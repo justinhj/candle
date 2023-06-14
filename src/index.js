@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+const mhn = require('murmurhash-native');
 
 const HASH_MAGIC_NUMBER = 0x9a11318f;
 const HASH_MAJOR_VERSION = 1;
@@ -7,12 +8,9 @@ const HASH_HEADER_SIZE= 112;
 
 async function loadHashHeader(index_file_path) {
   const fileHandle = await fs.open(index_file_path, 'r');
-
   const readBuffer = Buffer.alloc(8);
-
   await fileHandle.read(readBuffer, 0, 4);
 
-  // Check file is correct format
   const magicNumber = readBuffer.readUInt32LE(0);
   if (magicNumber !== HASH_MAGIC_NUMBER) {
     throw new Error('Invalid magic number');
@@ -37,15 +35,23 @@ async function loadHashHeader(index_file_path) {
 }
 
 async function run() {
-  const sample_log_file = 'testdata/SampleLog1.spl';
-  const sample_index_file = 'testdata/SampleLog1.spi';
+  const sampleLogFile = 'testdata/SampleLog1.spl';
+  const sampleIndexFile = 'testdata/SampleLog1.spi';
 
   try {
-    const header = await loadHashHeader(sample_index_file);
+    const header = await loadHashHeader(sampleIndexFile);
     console.log(JSON.stringify(header));
   } catch (e) {
     console.log(e.message);
   };
 };
+
+// native murmur hash
+  // // 32-bit hash
+  // const hash32 = mhn.murmurHash32('hello world');
+  // // 64-bit hash
+  // const hash64 = mhn.murmurHash64('hello world');
+  // console.log(hash32 + " " + hash64);
+
 
 run();
