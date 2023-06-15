@@ -8,6 +8,10 @@ const HASH_HEADER_SIZE= 112;
 
 BigInt.prototype.toJSON = function() { return this.toString() }
 
+function bigIntToNumberDivision(dividend, divisor) {
+  return Number(dividend*1000n/divisor)/1000.0;
+}
+
 async function readUint32(fp, buf) {
   await fp.read(buf, 0, 4);
   return buf.readUint32LE(0);
@@ -18,6 +22,19 @@ async function readUint64(fp, buf) {
   return buf.readBigUint64LE(0);
 }
 
+function hashHeaderToString(header) {
+
+  let average_displacement = bigIntToNumberDivision(header.total_displacement, header.num_entries);
+
+  return `Hash file version ${header.major_version}.${header.minor_version}
+Identifier: ${header.file_identifier.toString(16)}
+Max key size: ${header.max_key_len}, Max value size: ${header.max_value_len}
+Hash size: ${8*header.hash_size} bit Murmurhash3
+Num entries: ${header.num_entries}, Capacity: ${header.hash_capacity}
+Num collisions: ${header.hash_collisions}, Max displacement: ${header.max_displacement}, Average displacement: ${average_displacement}
+Data size: ${header.data_end}, Garbage size: ${header.garbage_size}`
+}
+
 async function loadHashHeader(index_file_path) {
   const fileHandle = await fs.open(index_file_path, 'r');
   const readBuffer = Buffer.alloc(8);
@@ -26,8 +43,6 @@ async function loadHashHeader(index_file_path) {
   const magicNumber = readBuffer.readUInt32LE(0);
   if (magicNumber !== HASH_MAGIC_NUMBER) {
     throw new Error('Invalid magic number');
-  } else {
-    console.log('Magic number checks out!');
   }
   let h = {};
   await fileHandle.read(readBuffer, 0, 8);
@@ -38,8 +53,8 @@ async function loadHashHeader(index_file_path) {
     throw new Error(`Hash file version mismatch. File version ${majorVersion}.${minorVersion} does not match ${HASH_MAJOR_VERSION}.${HASH_MINOR_VERSION}`);
   }
 
-  h.majorVersion = majorVersion;
-  h.minorVersion = minorVersion;
+  h.major_version = majorVersion;
+  h.minor_version = minorVersion;
 
   h.file_identifier = await readUint32(fileHandle, readBuffer);
   h.hash_seed = await readUint32(fileHandle, readBuffer);
@@ -89,7 +104,7 @@ async function run() {
 
   try {
     const header = await loadHashHeader(sampleIndexFile);
-    console.log(JSON.stringify(header));
+    console.log(hashHeaderToString(header));
   } catch (e) {
     console.log(e.message);
   };
