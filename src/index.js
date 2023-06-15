@@ -164,6 +164,42 @@ async function loadLogHeader(log_file_path) {
 async function openLog(log_file_path) {
   let log = {};
   log.header = await loadLogHeader(log_file_path);
+
+  log.data_len = log.header.data_end;
+
+  let fd = await fs.open(log_file_path, 'r');
+
+  let stats = await fd.stat();
+
+  console.log(`size ${stats.size}`);
+
+  // struct stat s;
+  // stat(filename, &s);
+  // if (log.data_len > (uint64_t) s.st_size) {
+  //   returncode = SPARKEY_LOG_TOO_SMALL;
+  //   goto cleanup;
+  // }
+
+  // fd = open(filename, O_RDONLY);
+  // if (fd < 0) {
+  //   returncode = sparkey_open_returncode(errno);
+  //   goto cleanup;
+  // }
+  // log.fd = fd;
+
+  // log.data = mmap(NULL, log.data_len, PROT_READ, MAP_SHARED, fd, 0);
+  // if (log.data == MAP_FAILED) {
+  //   returncode = SPARKEY_MMAP_FAILED;
+  //   goto cleanup;
+  // }
+
+  // log.open_status = MAGIC_VALUE_LOGREADER;
+  // return SPARKEY_SUCCESS;
+
+// cleanup:
+  // if (fd > 0) close(fd);
+  // return returncode;
+
   return log;
 }
 
