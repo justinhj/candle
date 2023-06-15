@@ -6,6 +6,11 @@ const HASH_MAJOR_VERSION = 1;
 const HASH_MINOR_VERSION = 1;
 const HASH_HEADER_SIZE= 112;
 
+const LOG_MAGIC_NUMBER = 0x49b39c95;
+const LOG_MAJOR_VERSION = 1;
+const LOG_MINOR_VERSION = 0;
+const LOG_HEADER_SIZE = 84;
+
 BigInt.prototype.toJSON = function() { return this.toString() }
 
 function bigIntToNumberDivision(dividend, divisor) {
@@ -42,14 +47,14 @@ async function loadHashHeader(index_file_path) {
 
   const magicNumber = readBuffer.readUInt32LE(0);
   if (magicNumber !== HASH_MAGIC_NUMBER) {
-    throw new Error('Invalid magic number');
+    throw new Error('Invalid magic number for index');
   }
   let h = {};
   await fileHandle.read(readBuffer, 0, 8);
   let majorVersion = readBuffer.readUint32LE(0);
   let minorVersion = readBuffer.readUint32LE(4);
 
-  if(majorVersion != HASH_MAJOR_VERSION || minorVersion != HASH_MINOR_VERSION) {
+  if(majorVersion != HASH_MAJOR_VERSION || minorVersion > HASH_MINOR_VERSION) {
     throw new Error(`Hash file version mismatch. File version ${majorVersion}.${minorVersion} does not match ${HASH_MAJOR_VERSION}.${HASH_MINOR_VERSION}`);
   }
 
@@ -98,13 +103,50 @@ async function loadHashHeader(index_file_path) {
   return h;
 }
 
+async function loadLogHeader(log_file_path) {
+  const fileHandle = await fs.open(log_file_path, 'r');
+  const readBuffer = Buffer.alloc(8);
+  await fileHandle.read(readBuffer, 0, 4);
+
+  const magicNumber = readBuffer.readUInt32LE(0);
+  if (magicNumber !== LOG_MAGIC_NUMBER) {
+    throw new Error('Invalid magic number for log');
+  }
+  let h = {};
+  await fileHandle.read(readBuffer, 0, 8);
+  let majorVersion = readBuffer.readUint32LE(0);
+  let minorVersion = readBuffer.readUint32LE(4);
+
+  if(majorVersion != LOG_MAJOR_VERSION || minorVersion > LOG_MAJOR_VERSION) {
+    throw new Error(`Log file version mismatch. File version ${majorVersion}.${minorVersion} does not match ${LOG_MAJOR_VERSION}.${LOG_MAJOR_VERSION}`);
+  }
+
+  h.major_version = majorVersion;
+  h.minor_version = minorVersion;
+
+  console.log(JSON.stringify(h));
+  return h;
+}
+
+async function openHash(index_file_path, log_file_path) {
+  let reader = {};
+  reader.header = await loadHashHeader(index_file_path); 
+  console.log(hashHeaderToString(reader.header));
+  reader.log = await loadLogHeader(log_file_path);
+
+  return true;
+}
+
+async function closeHash(reader) {
+  // TODO get the index file handle and close it 
+}
+
 async function run() {
-  const sampleLogFile = 'testdata/SampleLog1.spl';
   const sampleIndexFile = 'testdata/SampleLog1.spi';
+  const sampleLogFile = 'testdata/SampleLog1.spl';
 
   try {
-    const header = await loadHashHeader(sampleIndexFile);
-    console.log(hashHeaderToString(header));
+    await openHash(sampleIndexFile, sampleLogFile);
   } catch (e) {
     console.log(e.message);
   };
