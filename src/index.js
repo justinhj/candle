@@ -8,6 +8,16 @@ const HASH_HEADER_SIZE= 112;
 
 BigInt.prototype.toJSON = function() { return this.toString() }
 
+async function readUint32(fp, buf) {
+  await fp.read(buf, 0, 4);
+  return buf.readUint32LE(0);
+}
+
+async function readUint64(fp, buf) {
+  await fp.read(buf, 0, 8);
+  return buf.readBigUint64LE(0);
+}
+
 async function loadHashHeader(index_file_path) {
   const fileHandle = await fs.open(index_file_path, 'r');
   const readBuffer = Buffer.alloc(8);
@@ -31,49 +41,43 @@ async function loadHashHeader(index_file_path) {
   h.majorVersion = majorVersion;
   h.minorVersion = minorVersion;
 
-  await fileHandle.read(readBuffer, 0, 4);
-  h.file_identifier = readBuffer.readUint32LE(0);
-  await fileHandle.read(readBuffer, 0, 4);
-  h.hash_seed = readBuffer.readUint32LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.data_end = readBuffer.readBigUint64LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.max_key_len = readBuffer.readBigUint64LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.max_value_len = readBuffer.readBigUint64LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.num_puts = readBuffer.readBigUint64LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.garbage_size = readBuffer.readBigUint64LE(0);
-  await fileHandle.read(readBuffer, 0, 8);
-  h.num_entries = readBuffer.readBigUint64LE(0);
+  h.file_identifier = await readUint32(fileHandle, readBuffer);
+  h.hash_seed = await readUint32(fileHandle, readBuffer);
+  h.data_end = await readUint64(fileHandle, readBuffer);
+  h.max_key_len = await readUint64(fileHandle, readBuffer);
+  h.max_value_len = await readUint64(fileHandle, readBuffer);
+  h.num_puts = await readUint64(fileHandle, readBuffer);
+  h.garbage_size = await readUint64(fileHandle, readBuffer);
+  h.num_entries = await readUint64(fileHandle, readBuffer);
 
-  // RETHROW(fread_little_endian32(fp, &header->address_size));
-  // RETHROW(fread_little_endian32(fp, &header->hash_size));
-  // RETHROW(fread_little_endian64(fp, &header->hash_capacity));
-  // RETHROW(fread_little_endian64(fp, &header->max_displacement));
-  // RETHROW(fread_little_endian32(fp, &header->entry_block_bits));
-  // header->entry_block_bitmask = (1 << header->entry_block_bits) - 1;
-  // RETHROW(fread_little_endian64(fp, &header->hash_collisions));
-  // RETHROW(fread_little_endian64(fp, &header->total_displacement));
-  // header->header_size = HASH_HEADER_SIZE;
+  h.address_size = await readUint32(fileHandle, readBuffer);
+  h.hash_size = await readUint32(fileHandle, readBuffer);
+  h.hash_capacity = await readUint64(fileHandle, readBuffer);
+  h.max_displacement = await readUint64(fileHandle, readBuffer);
+  h.entry_block_bits = await readUint32(fileHandle, readBuffer);
+  h.entry_block_bitmask = (1 << h.entry_block_bits) -1;
+  h.hash_collisions = await readUint64(fileHandle, readBuffer);
+  h.total_displacement = await readUint64(fileHandle, readBuffer);
+  h.header_size = HASH_HEADER_SIZE;
 
-  // header->hash_algorithm = sparkey_get_hash_algorithm(header->hash_size);
-  // if (header->hash_algorithm.hash == NULL) {
-  //   return SPARKEY_HASH_HEADER_CORRUPT;
-  // }
-  // // Some basic consistency checks
-  // if (header->num_entries > header->num_puts) {
-  //   return SPARKEY_HASH_HEADER_CORRUPT;
-  // }
-  // if (header->max_displacement > header->num_entries) {
-  //   return SPARKEY_HASH_HEADER_CORRUPT;
-  // }
-  // if (header->hash_collisions > header->num_entries) {
-  //   return SPARKEY_HASH_HEADER_CORRUPT;
-  // }
+  if(h.hash_size === 4) {
+    h.hash_algorithm = mhn.murmurHash32;
+  } else if(h.hash_size === 8) {
+    h.hash_algorithm = mhn.murmurHash64;
+  } else {
+    throw new Error(`No hash algorithm for hash size ${h.hash_size}`);
+  }
 
-  // return SPARKEY_SUCCESS;
+  // Some basic consistency checks
+  if(h.num_entries > h.num_puts) {
+    throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
+  }
+  if (h.max_displacement > h.num_entries) {
+    throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
+  }
+  if (h.hash_collisions > h.num_entries) {
+    throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
+  }
 
   await fileHandle.close();
   return h;
