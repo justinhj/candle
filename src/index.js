@@ -11,6 +11,12 @@ const LOG_MAJOR_VERSION = 1;
 const LOG_MINOR_VERSION = 0;
 const LOG_HEADER_SIZE = 84;
 
+const sparkey_compression_type = {
+  SPARKEY_COMPRESSION_NONE: 0,
+  SPARKEY_COMPRESSION_SNAPPY: 1,
+  SPARKEY_COMPRESSION_ZSTD: 2
+};
+
 BigInt.prototype.toJSON = function() { return this.toString() }
 
 function bigIntToNumberDivision(dividend, divisor) {
@@ -117,22 +123,55 @@ async function loadLogHeader(log_file_path) {
   let majorVersion = readBuffer.readUint32LE(0);
   let minorVersion = readBuffer.readUint32LE(4);
 
-  if(majorVersion != LOG_MAJOR_VERSION || minorVersion > LOG_MAJOR_VERSION) {
+  if(majorVersion != LOG_MAJOR_VERSION || minorVersion > LOG_MINOR_VERSION) {
     throw new Error(`Log file version mismatch. File version ${majorVersion}.${minorVersion} does not match ${LOG_MAJOR_VERSION}.${LOG_MAJOR_VERSION}`);
   }
 
   h.major_version = majorVersion;
   h.minor_version = minorVersion;
 
+  h.file_identifier = await readUint32(fileHandle, readBuffer);
+  h.num_puts = await readUint64(fileHandle, readBuffer);
+  h.num_deletes = await readUint64(fileHandle, readBuffer);
+  h.data_end = await readUint64(fileHandle, readBuffer);
+  h.max_key_len = await readUint64(fileHandle, readBuffer);
+  h.max_value_len = await readUint64(fileHandle, readBuffer);
+  h.delete_size = await readUint64(fileHandle, readBuffer);
+  h.compression_type = await readUint32(fileHandle, readBuffer);
+  h.compression_block_size = await readUint32(fileHandle, readBuffer);
+  h.put_size = await readUint64(fileHandle, readBuffer);
+  h.max_entries_per_block = await readUint32(fileHandle, readBuffer);
+  h.header_size = LOG_HEADER_SIZE;
+
+  // Some basic consistency checks
+  if (h.data_end < h.header_size) {
+    throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
+  }
+  if (h.num_puts > h.data_end) {
+    throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
+  }
+  if (h.num_deletes > h.data_end) {
+    throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
+  }
+  if (h.compression_type > sparkey_compression_type.SPARKEY_COMPRESSION_ZSTD) {
+    throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
+  }
+
   console.log(JSON.stringify(h));
   return h;
+}
+
+async function openLog(log_file_path) {
+  let log = {};
+  log.header = await loadLogHeader(log_file_path);
+  return log;
 }
 
 async function openHash(index_file_path, log_file_path) {
   let reader = {};
   reader.header = await loadHashHeader(index_file_path); 
   console.log(hashHeaderToString(reader.header));
-  reader.log = await loadLogHeader(log_file_path);
+  reader.log = await openLog(log_file_path); 
 
   return true;
 }
