@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const mhn = require('murmurhash-native');
+const mmap = require('mmap-utils');
 
 const HASH_MAGIC_NUMBER = 0x9a11318f;
 const HASH_MAJOR_VERSION = 1;
@@ -182,14 +183,8 @@ async function openLog(log_file_path) {
   } 
 
   if(!error) {
-     log.fd = fd;
-
-  // Ignore for now, the C version memory maps the hash and log tables if possbile
-  // log.data = mmap(NULL, log.data_len, PROT_READ, MAP_SHARED, fd, 0);
-  // if (log.data == MAP_FAILED) {
-  //   returncode = SPARKEY_MMAP_FAILED;
-  //   goto cleanup;
-  // }
+    log.fd = fd;
+    log.data = mmap.map(Number(log.data_len), mmap.PROT_READ, mmap.MAP_SHARED, log.fd.fd);
     log.open_status = MAGIC_VALUE_LOGREADER;
   }
 
@@ -238,62 +233,78 @@ async function openHash(index_file_path, log_file_path) {
     error = "SPARKEY_LOG_TOO_SMALL";
   } 
 
-  // Memory mapping not supported in js version
-  // reader.data = mmap(NULL, reader.data_len, PROT_READ, MAP_SHARED, reader.fd, 0);
-  // if (reader.data == MAP_FAILED) {
-  //   returncode = SPARKEY_MMAP_FAILED;
-  //   goto close_reader;
-  // }
-
+  reader.data = mmap.map(Number(reader.data_len), mmap.PROT_READ, mmap.MAP_SHARED, reader.fd.fd);
   reader.open_status = MAGIC_VALUE_HASHREADER;
-
-// close_reader:
-  // sparkey_hash_close(&reader);
-  // return returncode;
-
-// free_reader:
-  // free(reader);
-  // return returncode;
-
 
   return reader;
 }
 
-async function hashGet(reader, key_string, log_iterator) {
+function read_addr(hashtable, pos, address_size) {
+  let offset = Number(pos);
+  if(!Number.isSafeInteger(offset)) {
+    throw new Error(`Offset too large for Buffer methods (${pos})`)
+  }
+
+  switch (address_size) {
+    case 4: return BigInt(hashtable.readUint32LE(offset));
+    case 8: return hashtable.readBigUint64LE(offset);
+  }
+  return -1n;
+}
+
+function read_hash(hashtable, pos, hash_size) {
+  let offset = Number(pos);
+  if(!Number.isSafeInteger(offset)) {
+    throw new Error(`Offset too large for Buffer methods (${pos})`)
+  }
+
+  switch (hash_size) {
+    case 4: return BigInt(hashtable.readUint32LE(offset));
+    case 8: return hashtable.readBigUint64LE(offset);
+  }
+  throw new Error(`Unsupported hash type ${hash_size}`)
+}
+
+async function get(reader, key_string, log_iterator) {
   console.log(`hash_get ${key_string}`)
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
   }
-  let hash = reader.header.hash_algorithm(key_string, reader.header.hash_seed);
+  let hash = BigInt(reader.header.hash_algorithm(key_string, reader.header.hash_seed));
+
   // uint64_t wanted_slot = hash % reader->header.hash_capacity;
   let wanted_slot = BigInt(hash) % reader.header.hash_capacity;
-  
-  console.log(`wanted slot is ${wanted_slot} of ${reader.header.hash_capacity}`);
+  slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
+  pos = wanted_slot * slot_size;
 
-  // int slot_size = reader->header.address_size + reader->header.hash_size;
-  // uint64_t pos = wanted_slot * slot_size;
+  displacement = 0;
+  slot = wanted_slot;
 
-  // uint64_t displacement = 0;
-  // uint64_t slot = wanted_slot;
+  hashtable = reader.data.slice(reader.header.header_size);
 
-  // uint8_t *hashtable = reader->data + reader->header.header_size;
-
-  // while (1) {
-  //   uint64_t hash2 = reader->header.hash_algorithm.read_hash(hashtable, pos);
-  //   uint64_t position2 = read_addr(hashtable, pos + reader->header.hash_size, reader->header.address_size);
-  //   if (position2 == 0) {
-  //     iter->state = SPARKEY_ITER_INVALID;
-  //     return SPARKEY_SUCCESS;
-  //   }
-  //   int entry_index2 = (int) (position2) & reader->header.entry_block_bitmask;
-  //   position2 >>= reader->header.entry_block_bits;
-  //   if (hash == hash2) {
-  //     RETHROW(sparkey_logiter_seek(iter, &reader->log, position2));
-  //     RETHROW(sparkey_logiter_skip(iter, &reader->log, entry_index2));
-  //     RETHROW(sparkey_logiter_next(iter, &reader->log));
-  //     uint64_t keylen2 = iter->keylen;
-  //     if (iter->type != SPARKEY_ENTRY_PUT) {
-  //       iter->state = SPARKEY_ITER_INVALID;
+  {
+  // while(1) {
+  //   uint64_t hash2 = reader.header.hash_algorithm.read_hash(hashtable, pos);
+    let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
+  //   uint64_t position2 = read_addr(hashtable, pos + reader.header.hash_size, reader.header.address_size);
+    position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
+    if (position2 === 0n) {
+      console.log('not found');
+      log_iterator.state = 'SPARKEY_ITER_INVALID';
+      return 'SPARKEY_SUCCESS';
+    }
+  //   int entry_index2 = (int) (position2) & reader.header.entry_block_bitmask;
+  //   position2 >>= reader.header.entry_block_bits;
+    console.log(hash);
+    console.log(hash2);
+    if (hash === hash2) {
+      console.log('found');
+  //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
+  //     RETHROW(sparkey_logiter_skip(iter, &reader.log, entry_index2));
+  //     RETHROW(sparkey_logiter_next(iter, &reader.log));
+  //     uint64_t keylen2 = iter.keylen;
+  //     if (iter.type != SPARKEY_ENTRY_PUT) {
+  //       iter.state = SPARKEY_ITER_INVALID;
   //       return SPARKEY_INTERNAL_ERROR;
   //     }
   //     if (keylen == keylen2) {
@@ -302,7 +313,7 @@ async function hashGet(reader, key_string, log_iterator) {
   //       while (pos2 < keylen) {
   //         uint8_t *buf2;
   //         uint64_t len2;
-  //         RETHROW(sparkey_logiter_keychunk(iter, &reader->log, keylen, &buf2, &len2));
+  //         RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
   //         if (memcmp(&key[pos2], buf2, len2) != 0) {
   //           equals = 0;
   //           break;
@@ -313,22 +324,22 @@ async function hashGet(reader, key_string, log_iterator) {
   //         return SPARKEY_SUCCESS;
   //       }
   //     }
-  //   }
-  //   uint64_t other_displacement = get_displacement(reader->header.hash_capacity, slot, hash2);
+      return 'SPARKEY_SUCCESS';
+    }
+  //   uint64_t other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
   //   if (displacement > other_displacement) {
-  //     iter->state = SPARKEY_ITER_INVALID;
+  //     iter.state = SPARKEY_ITER_INVALID;
   //     return SPARKEY_SUCCESS;
   //   }
   //   pos += slot_size;
   //   displacement++;
   //   slot++;
-  //   if (slot >= reader->header.hash_capacity) {
+  //   if (slot >= reader.header.hash_capacity) {
   //     pos = 0;
   //     slot = 0;
-  //   }
-  // }
-  // iter->state = SPARKEY_ITER_INVALID;
-  // return SPARKEY_INTERNAL_ERROR;
+  }
+  log_iterator.state = 'SPARKEY_ITER_INVALID';
+  return 'SPARKEY_INTERNAL_ERROR';
 }
 async function closeHash(reader) {
   closeLog(reader.log);
@@ -347,9 +358,9 @@ async function run() {
     let logiterator = {};
 
     // Can now do lookups
-    let getResult1 = await hashGet(hashReader, "key1", logiterator);
-    let getResult2 = await hashGet(hashReader, "key2", logiterator);
-    let getResult3 = await hashGet(hashReader, "key3", logiterator);
+    let getResult1 = await get(hashReader, "key1", logiterator);
+    let getResult2 = await get(hashReader, "key2", logiterator);
+    let getResult3 = await get(hashReader, "key3", logiterator);
 
 
     await closeHash(hashReader);

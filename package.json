@@ -10,6 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "murmurhash-native": "^3.5.0"
+    "mmap-utils": "^1.0.0",
+    "murmurhash-native": "^3.5.0",
+    "node-gyp": "^9.4.0",
+    "node-pre-gyp": "^0.17.0"
   }
 }
