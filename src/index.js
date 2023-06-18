@@ -15,6 +15,45 @@ const LOG_MAJOR_VERSION = 1;
 const LOG_MINOR_VERSION = 0;
 const LOG_HEADER_SIZE = 84;
 
+const sparkey_returncode = {
+  SPARKEY_SUCCESS: 0,
+  SPARKEY_INTERNAL_ERROR: -1,
+
+  SPARKEY_FILE_NOT_FOUND: -100,
+  SPARKEY_PERMISSION_DENIED: -101,
+  SPARKEY_TOO_MANY_OPEN_FILES: -102,
+  SPARKEY_FILE_TOO_LARGE: -103,
+  SPARKEY_FILE_ALREADY_EXISTS: -104,
+  SPARKEY_FILE_BUSY: -105,
+  SPARKEY_FILE_IS_DIRECTORY: -106,
+  SPARKEY_FILE_SIZE_EXCEEDED: -107,
+  SPARKEY_FILE_CLOSED: -108,
+  SPARKEY_OUT_OF_DISK: -109,
+  SPARKEY_UNEXPECTED_EOF: -110,
+  SPARKEY_MMAP_FAILED: -111,
+
+  SPARKEY_WRONG_LOG_MAGIC_NUMBER: -200,
+  SPARKEY_WRONG_LOG_MAJOR_VERSION: -201,
+  SPARKEY_UNSUPPORTED_LOG_MINOR_VERSION: -202,
+  SPARKEY_LOG_TOO_SMALL: -203,
+  SPARKEY_LOG_CLOSED: -204,
+  SPARKEY_LOG_ITERATOR_INACTIVE: -205,
+  SPARKEY_LOG_ITERATOR_MISMATCH: -206,
+  SPARKEY_LOG_ITERATOR_CLOSED: -207,
+  SPARKEY_LOG_HEADER_CORRUPT: -208,
+  SPARKEY_INVALID_COMPRESSION_BLOCK_SIZE: -209,
+  SPARKEY_INVALID_COMPRESSION_TYPE: -210,
+
+  SPARKEY_WRONG_HASH_MAGIC_NUMBER: -300,
+  SPARKEY_WRONG_HASH_MAJOR_VERSION: -301,
+  SPARKEY_UNSUPPORTED_HASH_MINOR_VERSION: -302,
+  SPARKEY_HASH_TOO_SMALL: -303,
+  SPARKEY_HASH_CLOSED: -304,
+  SPARKEY_FILE_IDENTIFIER_MISMATCH: -305,
+  SPARKEY_HASH_HEADER_CORRUPT: -306,
+  SPARKEY_HASH_SIZE_INVALID: -307,
+};
+
 // const MAGIC_VALUE_LOGITER = 0xd765c8cc;
 const MAGIC_VALUE_LOGREADER = 0xe93356c4;
 
@@ -45,6 +84,14 @@ async function readUint32(fp, buf) {
 async function readUint64(fp, buf) {
   await fp.read(buf, 0, 8);
   return buf.readBigUint64LE(0);
+}
+
+// Some of Sparkey code base uses 64 bit numbers
+function assert_safe_int(num) {
+  let converted = Number(num);
+  if(!Number.isSafeInteger(converted)) {
+    throw new Error(`${num} to large to be used as an integer`)
+  }
 }
 
 function hashHeaderToString(header) {
@@ -249,10 +296,7 @@ async function openHash(index_file_path, log_file_path) {
 
 function read_addr(hashtable, pos, address_size) {
   let offset = Number(pos);
-  if(!Number.isSafeInteger(offset)) {
-    throw new Error(`Offset too large for Buffer methods (${pos})`)
-  }
-
+  assert_safe_int(pos);
   switch (address_size) {
     case 4: return BigInt(hashtable.readUint32LE(offset));
     case 8: return hashtable.readBigUint64LE(offset);
@@ -290,17 +334,100 @@ function assert_iter_open(iter, log) {
   }
 }
 
-function logiter_seek(iter, log_reader, position) {
-  assert_iter_open(iter, log_reader);
-  console.log("based");
-  // if (position == log->header.data_end) {
-  //   iter->state = SPARKEY_ITER_CLOSED;
-  //   return SPARKEY_SUCCESS;
-  // }
+function seekblock(iter, log, position) {
+  iter.block_offset = 0;
+  if (iter.block_position === position) {
+    return SPARKEY_SUCCESS;
+  }
+  if (log.header.compression_type !== sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
+    throw new Error('compression not implemented');
+    // uint64_t pos = position;
+    // // TODO: assert that we're not reading > uint32_t
+    // uint32_t compressed_size = read_vlq(log.data, &pos);
+    // uint64_t next_pos = pos + compressed_size;
+    // uint32_t uncompressed_size = log.header.compression_block_size;
+
+    // sparkey_returncode ret = sparkey_compressors[log.header.compression_type].decompress(
+    //   &log.data[pos], compressed_size, iter.compression_buf, &uncompressed_size);
+    // if (ret !== sparkey_returncode.SPARKEY_SUCCESS) {
+    //   return ret;
+    // }
+
+    // iter.block_position = position;
+    // iter.next_block_position = next_pos;
+    // iter.block_len = uncompressed_size;
+  } else {
+    // iter.compression_buf = &log.data[position];
+    assert_safe_int(position); // TODO this could return Number
+    iter.compression_buf = log.data.slice(Number(position));
+    iter.block_position = position;
+    iter.next_block_position = log.header.data_end;
+    iter.block_len = log.data_len - position;
+  }
+  return sparkey_returncode.SPARKEY_SUCCESS;
+}
+
+function logiter_seek(iter, log, position) {
+  assert_iter_open(iter, log);
+  console.log("seek");
+  if(position == log.header.data_end) {
+    iter.state = sparkey_iterator_state.SPARKEY_ITER_CLOSED;
+    return sparkey_returncode.SPARKEY_SUCCESS;
+  }
+  let rc = seekblock(iter, log, position);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
   // RETHROW(seekblock(iter, log, position));
-  // iter->entry_count = -1;
-  // iter->state = SPARKEY_ITER_NEW;
-  // return SPARKEY_SUCCESS;
+  iter.entry_count = -1;
+  iter.state = sparkey_iterator_state.SPARKEY_ITER_NEW;
+  return sparkey_returncode.SPARKEY_SUCCESS;
+}
+
+// big int does not have min
+function min64(a, b) {
+  if (a < b) {
+    return a;
+  }
+  return b;
+}
+
+function ensure_available(iter, log) {
+  if (iter.block_offset < iter.block_len) {
+    return sparkey_returncode.SPARKEY_SUCCESS;
+  }
+
+  if (iter.next_block_position >= log.header.data_end) {
+    iter.block_position = 0;
+    iter.block_offset = 0;
+    iter.block_len = 0;
+    return sparkey_returncode.SPARKEY_SUCCESS;
+  }
+  let rc = seekblock(iter, log, iter.next_block_position);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
+  iter.entry_count = -1;
+
+  return sparkey_returncode.SPARKEY_SUCCESS;
+}
+
+function logiter_skip(iter, log, len) {
+  while (len > 0) {
+    let rc = ensure_available(iter, log);
+    if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+      throw new Error(`ensure available failed: ${rc}`);
+    }
+    let m = min64(len, iter.block_len - iter.block_offset);
+    len -= m;
+    iter.block_offset += m;
+  }
+  return sparkey_returncode.SPARKEY_SUCCESS;
+}
+
+function logiter_next(iter, log) {
+
+  // TODO 
 }
 
 async function get(reader, key_string, log_iterator) {
@@ -335,7 +462,10 @@ async function get(reader, key_string, log_iterator) {
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
       logiter_seek(log_iterator, reader.log, position2);
   //     RETHROW(sparkey_logiter_skip(iter, &reader.log, entry_index2));
+      logiter_skip(log_iterator, reader.log, entry_index2);
   //     RETHROW(sparkey_logiter_next(iter, &reader.log));
+      // TODO should be checking the ret codes here, just implement RETHROW
+      logiter_next(log_iterator, reader.log);
   //     uint64_t keylen2 = iter.keylen;
   //     // Saninty check it is a put not a delete entry
   //     if (iter.type != SPARKEY_ENTRY_PUT) {
