@@ -7,6 +7,7 @@ const HASH_MAJOR_VERSION = 1;
 const HASH_MINOR_VERSION = 1;
 const HASH_HEADER_SIZE= 112;
 
+const MAGIC_VALUE_LOGITER = 0xd765c8cc;
 const MAGIC_VALUE_HASHREADER = 0x75103df9;
 
 const LOG_MAGIC_NUMBER = 0x49b39c95;
@@ -16,6 +17,13 @@ const LOG_HEADER_SIZE = 84;
 
 // const MAGIC_VALUE_LOGITER = 0xd765c8cc;
 const MAGIC_VALUE_LOGREADER = 0xe93356c4;
+
+const sparkey_iterator_state = {
+  SPARKEY_ITER_NEW: 0,
+  SPARKEY_ITER_ACTIVE: 1,
+  SPARKEY_ITER_CLOSED: 2,
+  SPARKEY_ITER_INVALID: 3
+};
 
 const sparkey_compression_type = {
   SPARKEY_COMPRESSION_NONE: 0,
@@ -265,6 +273,36 @@ function read_hash(hashtable, pos, hash_size) {
   throw new Error(`Unsupported hash type ${hash_size}`)
 }
 
+function assert_log_open(log) {
+  if (log.open_status !== MAGIC_VALUE_LOGREADER) {
+    throw new Error('SPARKEY_LOG_CLOSED');
+  }
+}
+
+function assert_iter_open(iter, log) {
+  assert_log_open(log);
+  console.log(iter.open_status);
+  if(iter.open_status !== MAGIC_VALUE_LOGITER) {
+    throw new Error('SPARKEY_LOG_ITERATOR_CLOSED');
+  }
+  if (iter.file_identifier !== log.header.file_identifier) {
+    throw new Error('SPARKEY_LOG_ITERATOR_MISMATCH');
+  }
+}
+
+function logiter_seek(iter, log_reader, position) {
+  assert_iter_open(iter, log_reader);
+  console.log("based");
+  // if (position == log->header.data_end) {
+  //   iter->state = SPARKEY_ITER_CLOSED;
+  //   return SPARKEY_SUCCESS;
+  // }
+  // RETHROW(seekblock(iter, log, position));
+  // iter->entry_count = -1;
+  // iter->state = SPARKEY_ITER_NEW;
+  // return SPARKEY_SUCCESS;
+}
+
 async function get(reader, key_string, log_iterator) {
   console.log(`hash_get ${key_string}`)
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
@@ -284,25 +322,22 @@ async function get(reader, key_string, log_iterator) {
 
   {
   // while(1) {
-  //   uint64_t hash2 = reader.header.hash_algorithm.read_hash(hashtable, pos);
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
-  //   uint64_t position2 = read_addr(hashtable, pos + reader.header.hash_size, reader.header.address_size);
     position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
     if (position2 === 0n) {
       console.log('not found');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
       return 'SPARKEY_SUCCESS';
     }
-  //   int entry_index2 = (int) (position2) & reader.header.entry_block_bitmask;
-  //   position2 >>= reader.header.entry_block_bits;
-    console.log(hash);
-    console.log(hash2);
+    let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
+    position2 = position2 >> BigInt(reader.header.entry_block_bits);
     if (hash === hash2) {
-      console.log('found');
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
+      logiter_seek(log_iterator, reader.log, position2);
   //     RETHROW(sparkey_logiter_skip(iter, &reader.log, entry_index2));
   //     RETHROW(sparkey_logiter_next(iter, &reader.log));
   //     uint64_t keylen2 = iter.keylen;
+  //     // Saninty check it is a put not a delete entry
   //     if (iter.type != SPARKEY_ENTRY_PUT) {
   //       iter.state = SPARKEY_ITER_INVALID;
   //       return SPARKEY_INTERNAL_ERROR;
@@ -347,6 +382,49 @@ async function closeHash(reader) {
   reader.open_status = null;
 }
 
+function logiter_create(log) {
+  assert_log_open(log);
+
+  let iter = {};
+  iter.open_status = MAGIC_VALUE_LOGITER;
+  iter.file_identifier = log.header.file_identifier;
+  iter.block_position = 0;
+  iter.next_block_position = log.header.header_size;
+  iter.block_offset = 0;
+  iter.block_len = 0;
+  iter.state = sparkey_iterator_state.SPARKEY_ITER_NEW;
+
+  if(log.header.compression_type !== sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
+    throw new Error('Block compression not implemented');
+    // iter.compression_buf_allocated = 1;
+    // iter.compression_buf = malloc(log.header.compression_block_size);
+    // if (iter.compression_buf == NULL) {
+    //   free(iter);
+    //   return SPARKEY_INTERNAL_ERROR;
+    // }
+  } else {
+    iter.compression_buf_allocated = 0;
+  }
+
+  return iter;
+}
+
+function sparkey_logiter_close(iter) {
+  if (iter == NULL) {
+    return;
+  }
+  if(iter.open_status !== MAGIC_VALUE_LOGITER) {
+    return;
+  }
+  iter.open_status = 0;
+
+  // Probably not needed if you implement compression, the decompression will go into a Block
+  // and that can be simply garbage collected when the log iterator goes out of scope.
+  // if(iter.compression_buf_allocated) {
+  //   free(iter.compression_buf);
+  // }
+}
+
 async function run() {
   const sampleIndexFile = 'testdata/SampleLog1.spi';
   const sampleLogFile = 'testdata/SampleLog1.spl';
@@ -355,26 +433,16 @@ async function run() {
     let hashReader = await openHash(sampleIndexFile, sampleLogFile);
 
     // Need a log iterator
-    let logiterator = {};
+    let logIterator = logiter_create(hashReader.log);
 
     // Can now do lookups
-    let getResult1 = await get(hashReader, "key1", logiterator);
-    let getResult2 = await get(hashReader, "key2", logiterator);
-    let getResult3 = await get(hashReader, "key3", logiterator);
-
+    let getResult1 = await get(hashReader, "key1", logIterator);
+    let getResult2 = await get(hashReader, "key2", logIterator);
+    let getResult3 = await get(hashReader, "key3", logIterator);
 
     await closeHash(hashReader);
   } catch (e) {
     console.log(e.message);
   };
 };
-
-// native murmur hash
-  // // 32-bit hash
-  // const hash32 = mhn.murmurHash32('hello world');
-  // // 64-bit hash
-  // const hash64 = mhn.murmurHash64('hello world');
-  // console.log(hash32 + " " + hash64);
-
-
 run();
