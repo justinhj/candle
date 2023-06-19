@@ -70,6 +70,11 @@ const sparkey_compression_type = {
   SPARKEY_COMPRESSION_ZSTD: 2
 };
 
+const sparkey_entry_type = {
+  SPARKEY_ENTRY_PUT: 0,
+  SPARKEY_ENTRY_DELETE: 1
+};
+
 BigInt.prototype.toJSON = function() { return this.toString() }
 
 function bigIntToNumberDivision(dividend, divisor) {
@@ -113,7 +118,7 @@ async function loadHashHeader(index_file_path) {
   await fileHandle.read(readBuffer, 0, 4);
 
   const magicNumber = readBuffer.readUInt32LE(0);
-  if (magicNumber !== HASH_MAGIC_NUMBER) {
+  if(magicNumber !== HASH_MAGIC_NUMBER) {
     throw new Error('Invalid magic number for index');
   }
   let h = {};
@@ -159,10 +164,10 @@ async function loadHashHeader(index_file_path) {
   if(h.num_entries > h.num_puts) {
     throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
   }
-  if (h.max_displacement > h.num_entries) {
+  if(h.max_displacement > h.num_entries) {
     throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
   }
-  if (h.hash_collisions > h.num_entries) {
+  if(h.hash_collisions > h.num_entries) {
     throw new Error("SPARKEY_HASH_HEADER_CORRUPT");
   }
 
@@ -176,7 +181,7 @@ async function loadLogHeader(log_file_path) {
   await fileHandle.read(readBuffer, 0, 4);
 
   const magicNumber = readBuffer.readUInt32LE(0);
-  if (magicNumber !== LOG_MAGIC_NUMBER) {
+  if(magicNumber !== LOG_MAGIC_NUMBER) {
     throw new Error('Invalid magic number for log');
   }
   let h = {};
@@ -205,16 +210,16 @@ async function loadLogHeader(log_file_path) {
   h.header_size = LOG_HEADER_SIZE;
 
   // Some basic consistency checks
-  if (h.data_end < h.header_size) {
+  if(h.data_end < h.header_size) {
     throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
   }
-  if (h.num_puts > h.data_end) {
+  if(h.num_puts > h.data_end) {
     throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
   }
-  if (h.num_deletes > h.data_end) {
+  if(h.num_deletes > h.data_end) {
     throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
   }
-  if (h.compression_type > sparkey_compression_type.SPARKEY_COMPRESSION_ZSTD) {
+  if(h.compression_type > sparkey_compression_type.SPARKEY_COMPRESSION_ZSTD) {
     throw new Error("SPARKEY_LOG_HEADER_CORRUPT");
   }
 
@@ -265,16 +270,16 @@ async function openHash(index_file_path, log_file_path) {
 
   let error = null;
 
-  if (reader.header.file_identifier != reader.log.header.file_identifier) {
+  if(reader.header.file_identifier != reader.log.header.file_identifier) {
     error = "SPARKEY_FILE_IDENTIFIER_MISMATCH";
   }
-  else if (reader.header.data_end > reader.log.header.data_end) {
+  else if(reader.header.data_end > reader.log.header.data_end) {
     error = "SPARKEY_HASH_HEADER_CORRUPT";
   }
-  else if (reader.header.max_key_len > reader.log.header.max_key_len) {
+  else if(reader.header.max_key_len > reader.log.header.max_key_len) {
     error = "SPARKEY_HASH_HEADER_CORRUPT";
   }
-  else if (reader.header.max_value_len > reader.log.header.max_value_len) {
+  else if(reader.header.max_value_len > reader.log.header.max_value_len) {
     error = "SPARKEY_HASH_HEADER_CORRUPT";
   }
 
@@ -318,28 +323,28 @@ function read_hash(hashtable, pos, hash_size) {
 }
 
 function assert_log_open(log) {
-  if (log.open_status !== MAGIC_VALUE_LOGREADER) {
+  if(log.open_status !== MAGIC_VALUE_LOGREADER) {
     throw new Error('SPARKEY_LOG_CLOSED');
   }
 }
 
 function assert_iter_open(iter, log) {
   assert_log_open(log);
-  console.log(iter.open_status);
   if(iter.open_status !== MAGIC_VALUE_LOGITER) {
     throw new Error('SPARKEY_LOG_ITERATOR_CLOSED');
   }
-  if (iter.file_identifier !== log.header.file_identifier) {
+  if(iter.file_identifier !== log.header.file_identifier) {
     throw new Error('SPARKEY_LOG_ITERATOR_MISMATCH');
   }
+  return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
 function seekblock(iter, log, position) {
-  iter.block_offset = 0;
-  if (iter.block_position === position) {
-    return SPARKEY_SUCCESS;
+  iter.block_offset = 0n;
+  if(iter.block_position === position) {
+    return sparkey_returncode.SPARKEY_SUCCESS;
   }
-  if (log.header.compression_type !== sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
+  if(log.header.compression_type !== sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
     throw new Error('compression not implemented');
     // uint64_t pos = position;
     // // TODO: assert that we're not reading > uint32_t
@@ -369,7 +374,6 @@ function seekblock(iter, log, position) {
 
 function logiter_seek(iter, log, position) {
   assert_iter_open(iter, log);
-  console.log("seek");
   if(position == log.header.data_end) {
     iter.state = sparkey_iterator_state.SPARKEY_ITER_CLOSED;
     return sparkey_returncode.SPARKEY_SUCCESS;
@@ -386,21 +390,20 @@ function logiter_seek(iter, log, position) {
 
 // big int does not have min
 function min64(a, b) {
-  if (a < b) {
+  if(a < b) {
     return a;
   }
   return b;
 }
 
 function ensure_available(iter, log) {
-  if (iter.block_offset < iter.block_len) {
+  if(iter.block_offset < iter.block_len) {
     return sparkey_returncode.SPARKEY_SUCCESS;
   }
-
-  if (iter.next_block_position >= log.header.data_end) {
-    iter.block_position = 0;
-    iter.block_offset = 0;
-    iter.block_len = 0;
+  if(iter.next_block_position >= log.header.data_end) {
+    iter.block_position = 0n;
+    iter.block_offset = 0n;
+    iter.block_len = 0n;
     return sparkey_returncode.SPARKEY_SUCCESS;
   }
   let rc = seekblock(iter, log, iter.next_block_position);
@@ -412,7 +415,18 @@ function ensure_available(iter, log) {
   return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
-function logiter_skip(iter, log, len) {
+function logiter_skip(iter, log, count) {
+  while(count > 0) {
+    count--;
+    let rc = logiter_next(iter, log);
+    if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+      throw new Error(rc);
+    }
+  }
+  return sparkey_returncode.SPARKEY_SUCCESS;
+}
+
+function skip(iter, log, len) {
   while (len > 0) {
     let rc = ensure_available(iter, log);
     if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
@@ -425,12 +439,99 @@ function logiter_skip(iter, log, len) {
   return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
-function logiter_next(iter, log) {
+// static inline uint64_t read_vlq(uint8_t * array, uint64_t *position)
+// Note we are using a Buffer here rather than an array but otherwise it's the same
+function read_vlq(buffer, position) {
+  let res = 0;
+  let shift = 0;
+  let tmp, tmp2;
+  while (1) {
+    let next_pos = position + 1n;
+    assert_safe_int(next_pos);
+    let safe_next_pos = Number(next_pos);
+    tmp = buffer[safe_next_pos]; // tmp = buffer[(*position)++];
+    tmp2 = tmp & 0x7f;
+    if(tmp == tmp2) {
+      return res | tmp << shift;
+    }
+    res |= tmp2 << shift;
+    shift += 7;
+  }
+  return res;
+}
 
-  // TODO 
+function logiter_next(iter, log) {
+  if(iter.state == sparkey_iterator_state.SPARKEY_ITER_CLOSED) {
+    return sparkey_returncode.SPARKEY_SUCCESS;
+  }
+  let key_remaining = 0;
+  let value_remaining = 0;
+  if(iter.state == sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
+    key_remaining = iter.key_remaining;
+    value_remaining = iter.value_remaining;
+  }
+
+  iter.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
+  iter.key_remaining = 0;
+  iter.value_remaining = 0;
+  iter.keylen = 0;
+  iter.valuelen = 0;
+  let rc = undefined;
+  rc = assert_iter_open(iter, log);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
+  rc = skip(iter, log, key_remaining);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
+  rc = skip(iter, log, value_remaining);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
+  rc = ensure_available(iter, log);
+  if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+    throw new Error(rc);
+  }
+  if(iter.block_len - iter.block_offset === 0n) {
+    // Reached end of data
+    iter.state = sparkey_iterator_state.SPARKEY_ITER_CLOSED;
+    return sparkey_returncode.SPARKEY_SUCCESS;
+  }
+
+  if(log.header.compression_type == sparkey_returncode.SPARKEY_COMPRESSION_NONE) {
+  	iter.block_position += iter.block_offset;
+  	iter.block_len -= iter.block_offset;
+  	iter.block_offset = 0n;
+    assert_safe_int(iter.block_position);
+    iter.compression_buf = log.data[Number(iter.block_position)];
+    iter.entry_count = -1;
+  }
+
+  iter.entry_count++;
+
+  let a = read_vlq(iter.compression_buf, iter.block_offset);
+  let b = read_vlq(iter.compression_buf, iter.block_offset);
+  if(a === 0) {
+    iter.keylen = iter.key_remaining = b;
+    iter.valuelen = iter.value_remaining = 0;
+    iter.type = sparkey_entry_type.SPARKEY_ENTRY_DELETE;
+  } else {
+    console.log(iter);
+    iter.keylen = iter.key_remaining = a - 1;
+    iter.valuelen = iter.value_remaining = b;
+    iter.type = sparkey_entry_type.SPARKEY_ENTRY_PUT;
+  }
+
+  iter.entry_block_position = iter.block_position;
+  iter.entry_block_offset = iter.block_offset;
+
+  iter.state = sparkey_iterator_state.SPARKEY_ITER_ACTIVE;
+  return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
 async function get(reader, key_string, log_iterator) {
+  let keylen = key_string.length;
   console.log(`hash_get ${key_string}`)
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
@@ -451,45 +552,57 @@ async function get(reader, key_string, log_iterator) {
   // while(1) {
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
     position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    if (position2 === 0n) {
+    console.log(`hashes ${hash} position2 ${hash2} position2 ${position2}`);
+    if(position2 === 0n) {
       console.log('not found');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
-      return 'SPARKEY_SUCCESS';
+      return sparkey_returncode.SPARKEY_SUCCESS;
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
     position2 = position2 >> BigInt(reader.header.entry_block_bits);
-    if (hash === hash2) {
+    if(hash === hash2) {
+      let rc = undefined;
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
-      logiter_seek(log_iterator, reader.log, position2);
+      rc = logiter_seek(log_iterator, reader.log, position2);
+      if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+        throw new Error(rc);
+      }
   //     RETHROW(sparkey_logiter_skip(iter, &reader.log, entry_index2));
-      logiter_skip(log_iterator, reader.log, entry_index2);
+      rc = logiter_skip(log_iterator, reader.log, entry_index2);
+      if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+        throw new Error(rc);
+      }
   //     RETHROW(sparkey_logiter_next(iter, &reader.log));
       // TODO should be checking the ret codes here, just implement RETHROW
-      logiter_next(log_iterator, reader.log);
-  //     uint64_t keylen2 = iter.keylen;
-  //     // Saninty check it is a put not a delete entry
-  //     if (iter.type != SPARKEY_ENTRY_PUT) {
-  //       iter.state = SPARKEY_ITER_INVALID;
-  //       return SPARKEY_INTERNAL_ERROR;
-  //     }
-  //     if (keylen == keylen2) {
-  //       uint64_t pos2 = 0;
-  //       int equals = 1;
-  //       while (pos2 < keylen) {
-  //         uint8_t *buf2;
-  //         uint64_t len2;
-  //         RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
-  //         if (memcmp(&key[pos2], buf2, len2) != 0) {
-  //           equals = 0;
-  //           break;
-  //         }
-  //         pos2 += len2;
-  //       }
-  //       if (equals) {
-  //         return SPARKEY_SUCCESS;
-  //       }
-  //     }
-      return 'SPARKEY_SUCCESS';
+      rc = logiter_next(log_iterator, reader.log);
+      if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+        throw new Error(rc);
+      }
+      let keylen2 = log_iterator.keylen;
+      // Sanity check it is a put not a delete entry
+      if(log_iterator.type !== sparkey_entry_type.SPARKEY_ENTRY_PUT) {
+        log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
+        return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
+      }
+      console.log(`yes ${keylen} ${keylen2}`);
+      if (keylen == keylen2) {
+        let pos2 = 0;
+        let equals = 1;
+        while (pos2 < keylen) {
+          // uint8_t *buf2;
+          // uint64_t len2;
+          // RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
+          // if (memcmp(&key[pos2], buf2, len2) != 0) {
+          //   equals = 0;
+          //   break;
+          // }
+          pos2 += len2;
+        }
+        if(equals) {
+          return sparkey_returncode.SPARKEY_SUCCESS;
+        }
+      }
+      return sparkey_returncode.SPARKEY_SUCCESS;
     }
   //   uint64_t other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
   //   if (displacement > other_displacement) {
@@ -503,8 +616,8 @@ async function get(reader, key_string, log_iterator) {
   //     pos = 0;
   //     slot = 0;
   }
-  log_iterator.state = 'SPARKEY_ITER_INVALID';
-  return 'SPARKEY_INTERNAL_ERROR';
+  log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
+  return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
 }
 async function closeHash(reader) {
   closeLog(reader.log);
@@ -518,10 +631,10 @@ function logiter_create(log) {
   let iter = {};
   iter.open_status = MAGIC_VALUE_LOGITER;
   iter.file_identifier = log.header.file_identifier;
-  iter.block_position = 0;
+  iter.block_position = 0n;
   iter.next_block_position = log.header.header_size;
-  iter.block_offset = 0;
-  iter.block_len = 0;
+  iter.block_offset = 0n;
+  iter.block_len = 0n;
   iter.state = sparkey_iterator_state.SPARKEY_ITER_NEW;
 
   if(log.header.compression_type !== sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
@@ -540,7 +653,7 @@ function logiter_create(log) {
 }
 
 function sparkey_logiter_close(iter) {
-  if (iter == NULL) {
+  if(iter == NULL) {
     return;
   }
   if(iter.open_status !== MAGIC_VALUE_LOGITER) {
@@ -556,8 +669,8 @@ function sparkey_logiter_close(iter) {
 }
 
 async function run() {
-  const sampleIndexFile = 'testdata/SampleLog1.spi';
-  const sampleLogFile = 'testdata/SampleLog1.spl';
+  const sampleIndexFile = 'SampleLog1.spi';
+  const sampleLogFile = 'SampleLog1.spl';
 
   try {
     let hashReader = await openHash(sampleIndexFile, sampleLogFile);
@@ -567,8 +680,8 @@ async function run() {
 
     // Can now do lookups
     let getResult1 = await get(hashReader, "key1", logIterator);
-    let getResult2 = await get(hashReader, "key2", logIterator);
-    let getResult3 = await get(hashReader, "key3", logIterator);
+    // let getResult2 = await get(hashReader, "key2", logIterator);
+    // let getResult3 = await get(hashReader, "key3", logIterator);
 
     await closeHash(hashReader);
   } catch (e) {
