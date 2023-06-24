@@ -518,28 +518,28 @@ function logiter_next(iter, log) {
   // console.log(`${iter.compression_buf.slice(0,10)} off ${iter.block_offset}`);
   // console.log(`buf ${iter.compression_buf} ${iter.block_offset}`);
 
-  console.log(`block_position ${iter.block_position} block_offset ${iter.block_offset}`);
+  // console.log(`block_position ${iter.block_position} block_offset ${iter.block_offset}`);
 
   let vnp = read_vlq(iter.compression_buf, iter.block_offset);
   
   let a = vnp.value;
   iter.block_offset = vnp.next_pos;
 
-  console.log(`a ${a}`);
+  // console.log(`a ${a}`);
 
   vnp = read_vlq(iter.compression_buf, iter.block_offset);
   
   let b = vnp.value;
   iter.block_offset = vnp.next_pos;
 
-  console.log(`b ${b}`);
+  // console.log(`b ${b}`);
 
   if(a === 0) {
     iter.keylen = iter.key_remaining = b;
     iter.valuelen = iter.value_remaining = 0;
     iter.type = sparkey_entry_type.SPARKEY_ENTRY_DELETE;
   } else {
-    console.log(iter);
+    // console.log(iter);
     iter.keylen = iter.key_remaining = a - 1;
     iter.valuelen = iter.value_remaining = b;
     iter.type = sparkey_entry_type.SPARKEY_ENTRY_PUT;
@@ -600,9 +600,9 @@ function logiter_chunk(iter, log, maxlen, chunk_remaining) {
     }
     let m = min64(chunk_remaining, iter.block_len - iter.block_offset);
     m = min64(maxlen_big, m);
-          console.log(`m ${m} ${typeof m}`);
-          console.log(`chunk_length ${chunk_length} ${typeof chunk_length}`);
-          console.log(`chunk_remaining ${chunk_remaining} ${typeof chunk_remaining}`);
+          // console.log(`m ${m} ${typeof m}`);
+          // console.log(`chunk_length ${chunk_length} ${typeof chunk_length}`);
+          // console.log(`chunk_remaining ${chunk_remaining} ${typeof chunk_remaining}`);
     chunk_length = m;
     assert_safe_int(iter.block_offset);
 
@@ -649,7 +649,7 @@ function get_displacement(capacity, slot, hash) {
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
-async function get(reader, key_string, log_iterator) {
+function get(reader, key_string, log_iterator) {
   let keylen = key_string.length;
 
   console.log(`hash_get ${key_string}`)
@@ -673,17 +673,17 @@ async function get(reader, key_string, log_iterator) {
 
   hashtable = reader.data.slice(reader.header.header_size);
 
-  while(1) { // TODO
+  while(1) {
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
     position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
+    // console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
       console.log('not found');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
-    console.log(`entry_index2 ${entry_index2}`);
+    // console.log(`entry_index2 ${entry_index2}`);
     position2 = position2 >> BigInt(reader.header.entry_block_bits);
     if(hash === hash2) {
       let rc = undefined;
@@ -709,13 +709,13 @@ async function get(reader, key_string, log_iterator) {
         log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
         return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
       }
-      console.log(`key lengths ${keylen} ${keylen2}`);
+      // console.log(`key lengths ${keylen} ${keylen2}`);
       if (keylen == keylen2) {
         let pos2 = 0n;
         let equals = 1;
         // To ensure there is an actual match and no collision we need to compare the key
         while (pos2 < keylen) {
-          console.log(pos2);
+          // console.log(pos2);
           // uint8_t *buf2;
           // uint64_t len2;
           // RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
@@ -730,12 +730,12 @@ async function get(reader, key_string, log_iterator) {
             console.log(`keychunk failed with rc ${result.rc}`);
             return result.rc;
           }
-          console.log('copying key chunk');
-          console.log(JSON.stringify(result));
-          console.log(`pos2 ${typeof pos2} ${pos2}`);
+          // console.log('copying key chunk');
+          // console.log(JSON.stringify(result));
+          // console.log(`pos2 ${typeof pos2} ${pos2}`);
 
           result.buffer.copy(keyBuffer,Number(pos2),0,Number(result.chunk_length));
-          console.log(`key from log file ${keyBuffer.toString()}`);
+          // console.log(`key from log file ${keyBuffer.toString()}`);
 
           pos2 += result.chunk_length;
         }
@@ -744,8 +744,7 @@ async function get(reader, key_string, log_iterator) {
 
             do {
               rc = logiter_valuechunk(log_iterator, reader.log, reader.log.header.max_value_len);
-              console.log(`logiter valuechunk ${JSON.stringify(rc)}`);
-
+              // console.log(`logiter valuechunk ${JSON.stringify(rc)}`);
               console.log(`value ${rc.buffer.slice(0, Number(rc.chunk_length)).toString()}`);
             } while(rc.chunk_remaining > 0n);
           }
@@ -805,10 +804,7 @@ function logiter_create(log) {
   return iter;
 }
 
-function sparkey_logiter_close(iter) {
-  if(iter == NULL) {
-    return;
-  }
+function logiter_close(iter) {
   if(iter.open_status !== MAGIC_VALUE_LOGITER) {
     return;
   }
@@ -834,9 +830,11 @@ async function run() {
     let logIterator = logiter_create(hashReader.log);
 
     // Can now do lookups
-    let getResult1 = await get(hashReader, "key1", logIterator);
-    let getResult2 = await get(hashReader, "key2", logIterator);
-    let getResult3 = await get(hashReader, "key3", logIterator);
+    let getResult1 = get(hashReader, "key1", logIterator);
+    let getResult2 = get(hashReader, "key2", logIterator);
+    let getResult3 = get(hashReader, "key3", logIterator);
+
+    logiter_close(logIterator);
 
     await closeHash(hashReader);
   } catch (e) {
