@@ -75,23 +75,27 @@ const sparkey_entry_type = {
   SPARKEY_ENTRY_DELETE: 1
 };
 
+// Allow string conversion of BigInt
 BigInt.prototype.toJSON = function() { return this.toString() }
 
 function bigIntToNumberDivision(dividend, divisor) {
   return Number(dividend*1000n/divisor)/1000.0;
 }
 
+// Helper to read 4 byte integers to Number
 async function readUint32(fp, buf) {
   await fp.read(buf, 0, 4);
   return buf.readUint32LE(0);
 }
 
+// Helper to read 8 byte integers to BigInt so precision is not lost
 async function readUint64(fp, buf) {
   await fp.read(buf, 0, 8);
   return buf.readBigUint64LE(0);
 }
 
 // Some of Sparkey code base uses 64 bit numbers
+// This asserts it is safe to do so and throws if not
 function assert_safe_int(num) {
   let converted = Number(num);
   if(!Number.isSafeInteger(converted)) {
@@ -99,6 +103,7 @@ function assert_safe_int(num) {
   }
 }
 
+// Debug info about the hash header, not needed for production
 function hashHeaderToString(header) {
 
   let average_displacement = bigIntToNumberDivision(header.total_displacement, header.num_entries);
@@ -112,6 +117,7 @@ Num collisions: ${header.hash_collisions}, Max displacement: ${header.max_displa
 Data size: ${header.data_end}, Garbage size: ${header.garbage_size}`
 }
 
+// Read the hash file and parse the header into an Object
 async function loadHashHeader(index_file_path) {
   const fileHandle = await fs.open(index_file_path, 'r');
   const readBuffer = Buffer.alloc(8);
@@ -175,6 +181,7 @@ async function loadHashHeader(index_file_path) {
   return h;
 }
 
+// Read the log header and parse into an Object
 async function loadLogHeader(log_file_path) {
   const fileHandle = await fs.open(log_file_path, 'r');
   const readBuffer = Buffer.alloc(8);
@@ -257,11 +264,13 @@ async function openLog(log_file_path) {
   return log;
 }
 
+// Closes the log file
 async function closeLog(log) {
   await log.fd.close();
   log.fd = null;
 }
 
+// Open a hash file, map its contents to memory
 async function openHash(index_file_path, log_file_path) {
   let reader = {};
   reader.header = await loadHashHeader(index_file_path); 
@@ -649,11 +658,8 @@ function get_displacement(capacity, slot, hash) {
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
-function get(reader, key_string, log_iterator) {
-  let keylen = key_string.length;
-
-  console.log(`hash_get ${key_string}`)
-
+function get(reader, log_iterator, lookupKeyBuf) {
+  let keylen = lookupKeyBuf.length
   // for performance this buffer can be allocated outside the get
   let keyBuffer = Buffer.alloc(Number(reader.log.header.max_key_len));
   let valueBuffer = Buffer.alloc(Number(reader.log.header.max_value_len));
@@ -661,14 +667,14 @@ function get(reader, key_string, log_iterator) {
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
   }
-  let hash = BigInt(reader.header.hash_algorithm(key_string, reader.header.hash_seed));
+  let hash = BigInt(reader.header.hash_algorithm(lookupKeyBuf, reader.header.hash_seed));
 
   // uint64_t wanted_slot = hash % reader->header.hash_capacity;
   let wanted_slot = BigInt(hash) % reader.header.hash_capacity;
   slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
   pos = wanted_slot * slot_size;
 
-  displacement = 0;
+  let displacement = 0;
   slot = wanted_slot;
 
   hashtable = reader.data.slice(reader.header.header_size);
@@ -829,10 +835,18 @@ async function run() {
     // Need a log iterator
     let logIterator = logiter_create(hashReader.log);
 
-    // Can now do lookups
-    let getResult1 = get(hashReader, "key1", logIterator);
-    let getResult2 = get(hashReader, "key2", logIterator);
-    let getResult3 = get(hashReader, "key3", logIterator);
+    // Create buffers for retrieved key and values
+    let keyBuffer = Buffer.alloc(Number(hashReader.log.header.max_key_len));
+    let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
+
+    let lookupKeys = [1,2,3,1].map(i => "key" + i).map(Buffer.from);
+    // console.log(JSON.stringify(logIterator));
+
+    // lookup each key
+    lookupKeys.forEach(keyBuf => {
+      console.log(`lookup ${keyBuf.toString()}`);
+      get(hashReader, logIterator, keyBuf);
+    });
 
     logiter_close(logIterator);
 
