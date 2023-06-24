@@ -632,6 +632,20 @@ function logiter_keychunk(iter, log, maxlen) {
   return logiter_chunk(iter, log, maxlen, BigInt(iter.key_remaining));
 }
 
+function logiter_valuechunk(iter, log, maxlen) {
+  return logiter_chunk(iter, log, maxlen, BigInt(iter.value_remaining));
+}
+
+// static inline uint64_t get_displacement(uint64_t capacity, uint64_t slot, uint64_t hash) {
+//   uint64_t wanted_slot = hash % capacity;
+//   return (capacity + (slot - wanted_slot)) % capacity;
+// }
+// note everything is bigint here
+function get_displacement(capacity, slot, hash) {
+  let wanted_slot = hash % capacity;
+  return (capacity + (slot - wanted_slot)) % capacity;
+}
+
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
@@ -726,23 +740,34 @@ async function get(reader, key_string, log_iterator) {
           pos2 += result.chunk_length;
         }
         if(equals) {
+          if(log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
+
+            do {
+              rc = logiter_valuechunk(log_iterator, reader.log, reader.log.header.max_value_len);
+              console.log(`logiter valuechunk ${JSON.stringify(rc)}`);
+
+              console.log(`value ${rc.buffer.slice(0, Number(rc.chunk_length)).toString()}`);
+            } while(rc.chunk_remaining > 0n);
+          }
+
           return sparkey_returncode.SPARKEY_SUCCESS;
         }
         // otherwise it wasn't a match keep going
       }
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
-  //   uint64_t other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
-  //   if (displacement > other_displacement) {
-  //     iter.state = SPARKEY_ITER_INVALID;
-  //     return SPARKEY_SUCCESS;
-  //   }
-  //   pos += slot_size;
-  //   displacement++;
-  //   slot++;
-  //   if (slot >= reader.header.hash_capacity) {
-  //     pos = 0;
-  //     slot = 0;
+    let other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
+    if (displacement > other_displacement) {
+      iter.state === SPARKEY_ITER_INVALID;
+      return sparkey_returncode.SPARKEY_SUCCESS;
+    }
+    pos += slot_size;
+    displacement++;
+    slot++;
+    if (slot >= reader.header.hash_capacity) {
+      pos = 0;
+      slot = 0;
+    }
   }
   log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
   return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
