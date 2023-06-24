@@ -250,7 +250,7 @@ async function openLog(log_file_path) {
 
   if(error) {
     console.log("ERROR");
-    fd.close();
+    await fd.close();
     throw new Error(error);
   }
 
@@ -258,7 +258,7 @@ async function openLog(log_file_path) {
 }
 
 async function closeLog(log) {
-  log.fd.close();
+  await log.fd.close();
   log.fd = null;
 }
 
@@ -773,7 +773,7 @@ async function get(reader, key_string, log_iterator) {
   return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
 }
 async function closeHash(reader) {
-  closeLog(reader.log);
+  await closeLog(reader.log);
   reader.log = null;
   reader.open_status = null;
 }
