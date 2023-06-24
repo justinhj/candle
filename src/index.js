@@ -408,7 +408,7 @@ function ensure_available(iter, log) {
   }
   let rc = seekblock(iter, log, iter.next_block_position);
   if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
-    throw new Error(rc);
+    return rc;
   }
   iter.entry_count = -1;
 
@@ -441,23 +441,27 @@ function skip(iter, log, len) {
 
 // static inline uint64_t read_vlq(uint8_t * array, uint64_t *position)
 // Note we are using a Buffer here rather than an array but otherwise it's the same
+// returns an object containing the value of the variable length quantity and the
+// new position 
 function read_vlq(buffer, position) {
   let res = 0;
   let shift = 0;
   let tmp, tmp2;
+  let next_pos;
   while (1) {
-    let next_pos = position + 1n;
+    next_pos = position;
     assert_safe_int(next_pos);
     let safe_next_pos = Number(next_pos);
     tmp = buffer[safe_next_pos]; // tmp = buffer[(*position)++];
+    next_pos = position + 1n;
     tmp2 = tmp & 0x7f;
     if(tmp == tmp2) {
-      return res | tmp << shift;
+      return {value: res | tmp << shift, next_pos: next_pos};
     }
     res |= tmp2 << shift;
     shift += 7;
   }
-  return res;
+  return {value: res, next_pos: next_pos};
 }
 
 function logiter_next(iter, log) {
@@ -504,14 +508,32 @@ function logiter_next(iter, log) {
   	iter.block_len -= iter.block_offset;
   	iter.block_offset = 0n;
     assert_safe_int(iter.block_position);
-    iter.compression_buf = log.data[Number(iter.block_position)];
+    iter.compression_buf = log.data.slice(Number(iter.block_position));
     iter.entry_count = -1;
   }
 
   iter.entry_count++;
 
-  let a = read_vlq(iter.compression_buf, iter.block_offset);
-  let b = read_vlq(iter.compression_buf, iter.block_offset);
+  // printf("block_position %llu block_offset %llu\n", iter->block_position, iter->block_offset);
+  // console.log(`${iter.compression_buf.slice(0,10)} off ${iter.block_offset}`);
+  // console.log(`buf ${iter.compression_buf} ${iter.block_offset}`);
+
+  console.log(`block_position ${iter.block_position} block_offset ${iter.block_offset}`);
+
+  let vnp = read_vlq(iter.compression_buf, iter.block_offset);
+  
+  let a = vnp.value;
+  iter.block_offset = vnp.next_pos;
+
+  console.log(`a ${a}`);
+
+  vnp = read_vlq(iter.compression_buf, iter.block_offset);
+  
+  let b = vnp.value;
+  iter.block_offset = vnp.next_pos;
+
+  console.log(`b ${b}`);
+
   if(a === 0) {
     iter.keylen = iter.key_remaining = b;
     iter.valuelen = iter.value_remaining = 0;
@@ -530,9 +552,98 @@ function logiter_next(iter, log) {
   return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
+
+// static sparkey_returncode sparkey_logiter_chunk(sparkey_logiter *iter, sparkey_logreader *log, uint64_t maxlen, uint64_t *len, uint8_t ** res, uint64_t *var) {
+//   RETHROW(assert_iter_open(iter, log));
+
+//   if (iter->state != SPARKEY_ITER_ACTIVE) {
+//     return SPARKEY_LOG_ITERATOR_INACTIVE;
+//   }
+
+//   if (*var > 0) {
+//     RETHROW(ensure_available(iter, log));
+//     uint64_t m = min64(*var, iter->block_len - iter->block_offset);
+//     m = min64(maxlen, m);
+//     *len = m;
+//     *res = &iter->compression_buf[iter->block_offset];
+//     iter->block_offset += m;
+//     *var -= m;
+//     return SPARKEY_SUCCESS;
+//   }
+//   *len = 0;
+//   return SPARKEY_SUCCESS;
+// }
+
+// sparkey_returncode sparkey_logiter_keychunk(sparkey_logiter *iter, sparkey_logreader *log, uint64_t maxlen, uint8_t ** res, uint64_t *len) {
+//   return sparkey_logiter_chunk(iter, log, maxlen, len, res, &iter->key_remaining);
+// }
+// static sparkey_returncode sparkey_logiter_chunk(sparkey_logiter *iter, sparkey_logreader *log, uint64_t maxlen, uint64_t *len, uint8_t ** res, uint64_t *var) {
+// Returns an object {rc: [return code], chunk_buffer: [Buffer containing the chunk], chunk_length: [length of the chunk], chunk_remain: [chunk remaining]} 
+// In the original code
+//   var tracks the remaining key/value length (chunk)
+//   res will be a buffer pointing to the data
+//   len is the length of res
+function logiter_chunk(iter, log, maxlen, chunk_remaining) {
+  assert_iter_open(iter, log);
+
+  let maxlen_big = BigInt(maxlen);
+  let chunk_length = 0n;
+
+  if(iter.state != sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
+    return {rc: sparkey_returncode.SPARKEY_LOG_ITERATOR_INACTIVE};
+  }
+
+  if(chunk_remaining > 0n) {
+    let rc = ensure_available(iter, log);
+    if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+      return {rc: rc};
+    }
+    let m = min64(chunk_remaining, iter.block_len - iter.block_offset);
+    m = min64(maxlen_big, m);
+          console.log(`m ${m} ${typeof m}`);
+          console.log(`chunk_length ${chunk_length} ${typeof chunk_length}`);
+          console.log(`chunk_remaining ${chunk_remaining} ${typeof chunk_remaining}`);
+    chunk_length = m;
+    assert_safe_int(iter.block_offset);
+
+    let buffer = iter.compression_buf.slice(Number(iter.block_offset));
+    iter.block_offset += m;
+    chunk_remaining -= m;
+    return {
+      rc: sparkey_returncode.SPARKEY_SUCCESS,
+      buffer: buffer,
+      chunk_remaining: chunk_remaining,
+      chunk_length: chunk_length
+    };
+  }
+
+  return {
+    rc: sparkey_returncode.SPARKEY_SUCCESS,
+    chunk_length: 0
+  };
+}
+
+// sparkey_returncode sparkey_logiter_keychunk(sparkey_logiter *iter, sparkey_logreader *log, uint64_t maxlen, uint8_t ** res, uint64_t *len) {
+//   return sparkey_logiter_chunk(iter, log, maxlen, len, res, &iter->key_remaining);
+// }
+// log iterator, a log, max len of returned data, res is the memory we want the result in, len is where to store the length of the key
+// Returns an object {rc: [return code], chunk_buffer: [Buffer containing the chunk], chunk_length: [length of the chunk]} 
+function logiter_keychunk(iter, log, maxlen) {
+  return logiter_chunk(iter, log, maxlen, BigInt(iter.key_remaining));
+}
+
+// TODO does need to be async?
+// Probably not because file operations are hidden by the mmap and are
+// blocking anyway
 async function get(reader, key_string, log_iterator) {
   let keylen = key_string.length;
+
   console.log(`hash_get ${key_string}`)
+
+  // for performance this buffer can be allocated outside the get
+  let keyBuffer = Buffer.alloc(Number(reader.log.header.max_key_len));
+  let valueBuffer = Buffer.alloc(Number(reader.log.header.max_value_len));
+
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
   }
@@ -549,16 +660,17 @@ async function get(reader, key_string, log_iterator) {
   hashtable = reader.data.slice(reader.header.header_size);
 
   {
-  // while(1) {
+  // while(1) { // TODO
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
     position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    console.log(`hashes ${hash} position2 ${hash2} position2 ${position2}`);
+    console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
       console.log('not found');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
+    console.log(`entry_index2 ${entry_index2}`);
     position2 = position2 >> BigInt(reader.header.entry_block_bits);
     if(hash === hash2) {
       let rc = undefined;
@@ -584,19 +696,32 @@ async function get(reader, key_string, log_iterator) {
         log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
         return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
       }
-      console.log(`yes ${keylen} ${keylen2}`);
+      console.log(`key lengths ${keylen} ${keylen2}`);
       if (keylen == keylen2) {
-        let pos2 = 0;
+        let pos2 = 0n;
         let equals = 1;
         while (pos2 < keylen) {
+          console.log(pos2);
           // uint8_t *buf2;
           // uint64_t len2;
           // RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
+          let result = logiter_keychunk(log_iterator, reader.log, keylen); 
           // if (memcmp(&key[pos2], buf2, len2) != 0) {
           //   equals = 0;
           //   break;
           // }
-          pos2 += len2;
+          if(result.rc !== sparkey_returncode.SPARKEY_SUCCESS) {
+            console.log(`keychunk failed with rc ${result.rc}`);
+            return result.rc;
+          }
+          console.log('copying key chunk');
+          console.log(JSON.stringify(result));
+          console.log(`pos2 ${typeof pos2} ${pos2}`);
+
+          result.buffer.copy(keyBuffer,Number(pos2),0,Number(result.chunk_length));
+          console.log(keyBuffer);
+
+          pos2 += result.chunk_length;
         }
         if(equals) {
           return sparkey_returncode.SPARKEY_SUCCESS;
@@ -674,6 +799,8 @@ async function run() {
 
   try {
     let hashReader = await openHash(sampleIndexFile, sampleLogFile);
+
+    console.log(`Opened hash file ${sampleIndexFile} with id ${hashReader.header.file_identifier}`);
 
     // Need a log iterator
     let logIterator = logiter_create(hashReader.log);
