@@ -659,8 +659,7 @@ async function get(reader, key_string, log_iterator) {
 
   hashtable = reader.data.slice(reader.header.header_size);
 
-  {
-  // while(1) { // TODO
+  while(1) { // TODO
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
     position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
     console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
@@ -700,12 +699,15 @@ async function get(reader, key_string, log_iterator) {
       if (keylen == keylen2) {
         let pos2 = 0n;
         let equals = 1;
+        // To ensure there is an actual match and no collision we need to compare the key
         while (pos2 < keylen) {
           console.log(pos2);
           // uint8_t *buf2;
           // uint64_t len2;
           // RETHROW(sparkey_logiter_keychunk(iter, &reader.log, keylen, &buf2, &len2));
           let result = logiter_keychunk(log_iterator, reader.log, keylen); 
+          // TODO compare the buffer as it is copied
+          // this relies on passing a buffer as the key lookup though so i'll do later
           // if (memcmp(&key[pos2], buf2, len2) != 0) {
           //   equals = 0;
           //   break;
@@ -719,13 +721,14 @@ async function get(reader, key_string, log_iterator) {
           console.log(`pos2 ${typeof pos2} ${pos2}`);
 
           result.buffer.copy(keyBuffer,Number(pos2),0,Number(result.chunk_length));
-          console.log(keyBuffer);
+          console.log(`key from log file ${keyBuffer.toString()}`);
 
           pos2 += result.chunk_length;
         }
         if(equals) {
           return sparkey_returncode.SPARKEY_SUCCESS;
         }
+        // otherwise it wasn't a match keep going
       }
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
@@ -807,8 +810,8 @@ async function run() {
 
     // Can now do lookups
     let getResult1 = await get(hashReader, "key1", logIterator);
-    // let getResult2 = await get(hashReader, "key2", logIterator);
-    // let getResult3 = await get(hashReader, "key3", logIterator);
+    let getResult2 = await get(hashReader, "key2", logIterator);
+    let getResult3 = await get(hashReader, "key3", logIterator);
 
     await closeHash(hashReader);
   } catch (e) {
