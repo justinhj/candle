@@ -292,6 +292,10 @@ async function openHash(index_file_path, log_file_path) {
     error = "SPARKEY_HASH_HEADER_CORRUPT";
   }
 
+  if(error) {
+    throw new Error(error);
+  }
+
   reader.fd = await fs.open(index_file_path, 'r');
   let stats = await reader.fd.stat();
 
@@ -457,11 +461,11 @@ function read_vlq(buffer, position) {
   let shift = 0;
   let tmp, tmp2;
   let next_pos;
-  while (1) {
+  while(true) { // eslint-disable-line no-constant-condition
     next_pos = position;
     assert_safe_int(next_pos);
     let safe_next_pos = Number(next_pos);
-    tmp = buffer[safe_next_pos]; // tmp = buffer[(*position)++];
+    tmp = buffer[safe_next_pos];
     next_pos = position + 1n;
     tmp2 = tmp & 0x7f;
     if(tmp == tmp2) {
@@ -470,7 +474,6 @@ function read_vlq(buffer, position) {
     res |= tmp2 << shift;
     shift += 7;
   }
-  return {value: res, next_pos: next_pos};
 }
 
 function logiter_next(iter, log) {
@@ -513,9 +516,9 @@ function logiter_next(iter, log) {
   }
 
   if(log.header.compression_type == sparkey_returncode.SPARKEY_COMPRESSION_NONE) {
-  	iter.block_position += iter.block_offset;
-  	iter.block_len -= iter.block_offset;
-  	iter.block_offset = 0n;
+    iter.block_position += iter.block_offset;
+    iter.block_len -= iter.block_offset;
+    iter.block_offset = 0n;
     assert_safe_int(iter.block_position);
     iter.compression_buf = log.data.slice(Number(iter.block_position));
     iter.entry_count = -1;
@@ -667,17 +670,17 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
 
   // uint64_t wanted_slot = hash % reader->header.hash_capacity;
   let wanted_slot = BigInt(hash) % reader.header.hash_capacity;
-  slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
-  pos = wanted_slot * slot_size;
+  let slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
+  let pos = wanted_slot * slot_size;
 
   let displacement = 0;
-  slot = wanted_slot;
+  let slot = wanted_slot;
 
-  hashtable = reader.data.slice(reader.header.header_size);
+  let hashtable = reader.data.slice(reader.header.header_size);
 
-  while(1) {
+  while(true) { // eslint-disable-line no-constant-condition
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
-    position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
+    let position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
     // console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
       console.log('not found');
@@ -763,7 +766,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     }
     let other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
     if (displacement > other_displacement) {
-      iter.state === SPARKEY_ITER_INVALID;
+      log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_INVALID;
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
     pos += slot_size;
@@ -774,8 +777,8 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
       slot = 0;
     }
   }
-  log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
-  return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
+  // log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
+  // return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
 }
 async function closeHash(reader) {
   await closeLog(reader.log);
@@ -853,6 +856,6 @@ async function run() {
     await closeHash(hashReader);
   } catch (e) {
     console.log(e.message);
-  };
-};
+  }
+}
 run();

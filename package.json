@@ -2,9 +2,9 @@
   "name": "candle",
   "version": "1.0.0",
   "description": "A Sparkey hash reader for javascript",
-  "main": "src/index.js",
+  "main": "src/index.cjs",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/index.cjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
@@ -14,5 +14,8 @@
     "murmurhash-native": "^3.5.0",
     "node-gyp": "^9.4.0",
     "node-pre-gyp": "^0.17.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.43.0"
   }
 }
