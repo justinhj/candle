@@ -658,7 +658,7 @@ function get_displacement(capacity, slot, hash) {
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
-function get(reader, log_iterator, lookupKeyBuf, keyBuffer, valueBuffer) {
+function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   let keylen = lookupKeyBuf.length
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
@@ -714,7 +714,7 @@ function get(reader, log_iterator, lookupKeyBuf, keyBuffer, valueBuffer) {
       // console.log(`key lengths ${keylen} ${keylen2}`);
       if (keylen == keylen2) {
         let pos2 = 0n;
-        let equals = 1;
+        let equals = true;
         // To ensure there is an actual match and no collision we need to compare the key
         while (pos2 < keylen) {
           // console.log(pos2);
@@ -732,13 +732,15 @@ function get(reader, log_iterator, lookupKeyBuf, keyBuffer, valueBuffer) {
             console.log(`keychunk failed with rc ${result.rc}`);
             return result.rc;
           }
-          // console.log('copying key chunk');
-          // console.log(JSON.stringify(result));
-          // console.log(`pos2 ${typeof pos2} ${pos2}`);
 
-          result.buffer.copy(keyBuffer,Number(pos2),0,Number(result.chunk_length));
-          // console.log(`key from log file ${keyBuffer.toString()}`);
-
+          // Compare this chunk of the key with the search key since hash collisions
+          // may occur
+          // buf.compare(target[, targetStart[, targetEnd[, sourceStart[, sourceEnd]]]])
+          if(lookupKeyBuf.compare(result.buffer,0,Number(result.chunk_length - 1n),Number(pos2),Number(pos2 + result.chunk_length - 1n))
+            !== 0) {
+            // console.log('key not equals');
+            equals = false;
+          }
           pos2 += result.chunk_length;
         }
         if(equals) {
@@ -833,8 +835,7 @@ async function run() {
     // Need a log iterator
     let logIterator = logiter_create(hashReader.log);
 
-    // Create buffers for retrieved key and values
-    let keyBuffer = Buffer.alloc(Number(hashReader.log.header.max_key_len));
+    // Create buffers for retrieved values
     let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
 
     let lookupKeys = [1,2,3,1].map(i => "key" + i).map(Buffer.from);
@@ -843,7 +844,7 @@ async function run() {
     // lookup each key
     lookupKeys.forEach(lookupKeyBuf => {
       console.log(`lookup ${lookupKeyBuf.toString()}`);
-      get(hashReader, logIterator, lookupKeyBuf, keyBuffer, valueBuffer);
+      get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
       console.log(valueBuffer.toString());
     });
 
