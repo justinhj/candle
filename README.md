@@ -1,12 +1,18 @@
 # Candle
 
-Candle is a Node.js project that implements the key lookup functionality for
-Sparkey log db and uses mmap.
+Candle implements key lookups for Spotify's [Sparkey](https://github.com/spotify/sparkey) key/value storage library.
+
+The goal is to implement the key lookup entirely in Javascript to avoid the complexity and overhead of FFI.
+
+Since the hash and log files are mapped to memory using mmap, which is not natively supported in node.js, a dependency on the [mmap-utils](https://www.npmjs.com/package/mmap-utils) npm package.
+
+In local testing on an Intel MacBook seems to be able to do 700k gets per second on a log file with 1 million entries. More benchmarks to come.
 
 ## Features
 
-- Key lookup functionality for Sparkey log db
-- Uses mmap
+- Loads Sparkey hash and log files 
+- Pure Javascript implementation
+- Performance sensitive implementation
 
 ## Installation
 
@@ -17,6 +23,7 @@ Sparkey log db and uses mmap.
 
 ``` javascript
 const candle = require('candle');
+// TODO make modules and add instructions here or link to example
 ```
 
 ## Contributing
