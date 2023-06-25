@@ -658,12 +658,8 @@ function get_displacement(capacity, slot, hash) {
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
-function get(reader, log_iterator, lookupKeyBuf) {
+function get(reader, log_iterator, lookupKeyBuf, keyBuffer, valueBuffer) {
   let keylen = lookupKeyBuf.length
-  // for performance this buffer can be allocated outside the get
-  let keyBuffer = Buffer.alloc(Number(reader.log.header.max_key_len));
-  let valueBuffer = Buffer.alloc(Number(reader.log.header.max_value_len));
-
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
     throw new Error("Hash reader is not open");
   }
@@ -748,11 +744,13 @@ function get(reader, log_iterator, lookupKeyBuf) {
         if(equals) {
           if(log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
 
+            let result;
+            let pos = 0n;
             do {
-              rc = logiter_valuechunk(log_iterator, reader.log, reader.log.header.max_value_len);
-              // console.log(`logiter valuechunk ${JSON.stringify(rc)}`);
-              console.log(`value ${rc.buffer.slice(0, Number(rc.chunk_length)).toString()}`);
-            } while(rc.chunk_remaining > 0n);
+              result = logiter_valuechunk(log_iterator, reader.log, reader.log.header.max_value_len);
+              result.buffer.copy(valueBuffer,Number(0),Number(pos),Number(result.chunk_length));
+              pos += result.chunk_length;
+            } while(result.chunk_remaining > 0n);
           }
 
           return sparkey_returncode.SPARKEY_SUCCESS;
@@ -843,9 +841,10 @@ async function run() {
     // console.log(JSON.stringify(logIterator));
 
     // lookup each key
-    lookupKeys.forEach(keyBuf => {
-      console.log(`lookup ${keyBuf.toString()}`);
-      get(hashReader, logIterator, keyBuf);
+    lookupKeys.forEach(lookupKeyBuf => {
+      console.log(`lookup ${lookupKeyBuf.toString()}`);
+      get(hashReader, logIterator, lookupKeyBuf, keyBuffer, valueBuffer);
+      console.log(valueBuffer.toString());
     });
 
     logiter_close(logIterator);
