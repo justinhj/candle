@@ -658,6 +658,8 @@ function get_displacement(capacity, slot, hash) {
 // TODO does need to be async?
 // Probably not because file operations are hidden by the mmap and are
 // blocking anyway
+// Returns this object
+// {found: boolean, length: if found is the length of the value in the value buffer}
 function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   let keylen = lookupKeyBuf.length
   if(reader.open_status !== MAGIC_VALUE_HASHREADER) {
@@ -680,9 +682,12 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     let position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
     // console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
-      console.log('not found, end of hash table');
+      // console.log('not found, end of hash table');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
-      return sparkey_returncode.SPARKEY_SUCCESS;
+      return {
+        found: false,
+        length: 0
+      };
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
     // console.log(`entry_index2 ${entry_index2}`);
@@ -730,7 +735,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
           // }
           if(result.rc !== sparkey_returncode.SPARKEY_SUCCESS) {
             console.log(`keychunk failed with rc ${result.rc}`);
-            return result.rc;
+            throw new Error(result.rc);
           }
 
           // Compare this chunk of the key with the search key since hash collisions
@@ -745,7 +750,6 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
         }
         if(equals) {
           if(log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
-
             let result;
             let pos = 0n;
             do {
@@ -753,21 +757,20 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
               result.buffer.copy(valueBuffer,Number(0),Number(pos),Number(result.chunk_length));
               pos += result.chunk_length;
             } while(result.chunk_remaining > 0n);
+            assert_safe_int(pos);
+            return {
+              found: true,
+              length: Number(pos)
+            };
           }
-
-          console.log('return success found');
-          return sparkey_returncode.SPARKEY_SUCCESS;
         }
-        // otherwise it wasn't a match keep going
       }
-      console.log('return dah'); // needed?
-      return sparkey_returncode.SPARKEY_SUCCESS;
     }
     let other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
     if (displacement > other_displacement) {
       log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_INVALID;
-      console.log('return not found');
-      return sparkey_returncode.SPARKEY_SUCCESS;
+      console.log('return not found displacement');
+      return {found: false, length: 0};
     }
     pos += slot_size;
     displacement++;
@@ -826,7 +829,7 @@ function logiter_close(iter) {
 
 async function run() {
   const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
-  const sparkeyTable = 'sparkey2000';
+  const sparkeyTable = 'sparkey20';
 
   const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
   const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
@@ -834,7 +837,7 @@ async function run() {
 
   try {
     const keyFileContents = await fs.readFile(keysFile, 'utf-8');
-    const lookupKeys = keyFileContents.split('\n').map(k => Buffer.from(k));
+    const lookupKeys = keyFileContents.split('\n').filter(k => k.length > 0).map(k => Buffer.from(k));
 
     let hashReader = await openHash(sampleIndexFile, sampleLogFile);
 
@@ -846,17 +849,22 @@ async function run() {
     // Create buffers for retrieved values
     let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
 
-    // let lookupKeys = [1,2,3,1].map(i => "key" + i).map(Buffer.from);
-    // console.log(JSON.stringify(logIterator));
+    let found = 0;
+    let not_found = 0;
 
-    // lookup each key
     lookupKeys.forEach(lookupKeyBuf => {
       console.log(`lookup ${lookupKeyBuf.toString()}`);
-      get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
-      console.log(valueBuffer.toString());
+      let result = get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
+      if(result.found) {
+        found += 1;
+        console.log(valueBuffer.slice(0, result.length).toString() + result.length);
+      } else {
+        not_found += 1;
+      }
     });
 
     logiter_close(logIterator);
+    console.log(`found count ${found}, not found count ${not_found}`);
 
     await closeHash(hashReader);
   } catch (e) {
