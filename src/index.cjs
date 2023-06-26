@@ -769,7 +769,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     let other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
     if (displacement > other_displacement) {
       log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_INVALID;
-      console.log('return not found displacement');
+      // console.log('return not found displacement');
       return {found: false, length: 0};
     }
     pos += slot_size;
@@ -829,7 +829,7 @@ function logiter_close(iter) {
 
 async function run() {
   const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
-  const sparkeyTable = 'sparkey20';
+  const sparkeyTable = 'sparkey1million';
 
   const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
   const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
@@ -852,20 +852,24 @@ async function run() {
     let found = 0;
     let not_found = 0;
 
+    console.log(`Performing lookup on ${lookupKeys.length} keys.`);
+    console.time('lookups');
+
     lookupKeys.forEach(lookupKeyBuf => {
-      console.log(`lookup ${lookupKeyBuf.toString()}`);
+      // console.log(`lookup ${lookupKeyBuf.toString()}`);
       let result = get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
       if(result.found) {
         found += 1;
-        console.log(valueBuffer.slice(0, result.length).toString() + result.length);
+        // console.log(valueBuffer.slice(0, result.length).toString() + result.length);
       } else {
         not_found += 1;
       }
     });
 
-    logiter_close(logIterator);
+    console.timeEnd('lookups');
     console.log(`found count ${found}, not found count ${not_found}`);
 
+    logiter_close(logIterator);
     await closeHash(hashReader);
   } catch (e) {
     console.log(e.message);
