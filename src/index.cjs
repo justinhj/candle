@@ -319,20 +319,17 @@ function read_addr(hashtable, pos, address_size) {
     case 4: return BigInt(hashtable.readUint32LE(offset));
     case 8: return hashtable.readBigUint64LE(offset);
   }
-  return -1n;
+  throw new Error(`Unsupported address size ${address_size}`)
 }
 
 function read_hash(hashtable, pos, hash_size) {
+  assert_safe_int(pos);
   let offset = Number(pos);
-  if(!Number.isSafeInteger(offset)) {
-    throw new Error(`Offset too large for Buffer methods (${pos})`)
-  }
-
   switch (hash_size) {
     case 4: return BigInt(hashtable.readUint32LE(offset));
     case 8: return hashtable.readBigUint64LE(offset);
   }
-  throw new Error(`Unsupported hash type ${hash_size}`)
+  throw new Error(`Unsupported hash size ${hash_size}`)
 }
 
 function assert_log_open(log) {
@@ -683,7 +680,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     let position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
     // console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
-      console.log('not found');
+      console.log('not found, end of hash table');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
@@ -712,7 +709,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
       // Sanity check it is a put not a delete entry
       if(log_iterator.type !== sparkey_entry_type.SPARKEY_ENTRY_PUT) {
         log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
-        return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
+        throw new Error(sparkey_returncode.SPARKEY_INTERNAL_ERROR);
       }
       // console.log(`key lengths ${keylen} ${keylen2}`);
       if (keylen == keylen2) {
@@ -758,15 +755,18 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
             } while(result.chunk_remaining > 0n);
           }
 
+          console.log('return success found');
           return sparkey_returncode.SPARKEY_SUCCESS;
         }
         // otherwise it wasn't a match keep going
       }
+      console.log('return dah'); // needed?
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
     let other_displacement = get_displacement(reader.header.hash_capacity, slot, hash2);
     if (displacement > other_displacement) {
       log_iterator.state === sparkey_iterator_state.SPARKEY_ITER_INVALID;
+      console.log('return not found');
       return sparkey_returncode.SPARKEY_SUCCESS;
     }
     pos += slot_size;
@@ -777,8 +777,6 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
       slot = 0n;
     }
   }
-  // log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
-  // return sparkey_returncode.SPARKEY_INTERNAL_ERROR;
 }
 async function closeHash(reader) {
   await closeLog(reader.log);
@@ -828,7 +826,7 @@ function logiter_close(iter) {
 
 async function run() {
   const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
-  const sparkeyTable = 'sparkey10';
+  const sparkeyTable = 'sparkey2000';
 
   const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
   const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
