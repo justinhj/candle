@@ -673,7 +673,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   let slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
   let pos = wanted_slot * slot_size;
 
-  let displacement = 0;
+  let displacement = 0n;
   let slot = wanted_slot;
 
   let hashtable = reader.data.slice(reader.header.header_size);
@@ -773,8 +773,8 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     displacement++;
     slot++;
     if (slot >= reader.header.hash_capacity) {
-      pos = 0;
-      slot = 0;
+      pos = 0n;
+      slot = 0n;
     }
   }
   // log_iterator.state = sparkey_iterator_state.SPARKEY_ITER_INVALID;
@@ -827,10 +827,17 @@ function logiter_close(iter) {
 }
 
 async function run() {
-  const sampleIndexFile = 'SampleLog1.spi';
-  const sampleLogFile = 'SampleLog1.spl';
+  const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
+  const sparkeyTable = 'sparkey10';
+
+  const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
+  const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
+  const keysFile = sparkeyPath + sparkeyTable + '.csv';
 
   try {
+    const keyFileContents = await fs.readFile(keysFile, 'utf-8');
+    const lookupKeys = keyFileContents.split('\n').map(k => Buffer.from(k));
+
     let hashReader = await openHash(sampleIndexFile, sampleLogFile);
 
     console.log(`Opened hash file ${sampleIndexFile} with id ${hashReader.header.file_identifier}`);
@@ -841,7 +848,7 @@ async function run() {
     // Create buffers for retrieved values
     let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
 
-    let lookupKeys = [1,2,3,1].map(i => "key" + i).map(Buffer.from);
+    // let lookupKeys = [1,2,3,1].map(i => "key" + i).map(Buffer.from);
     // console.log(JSON.stringify(logIterator));
 
     // lookup each key

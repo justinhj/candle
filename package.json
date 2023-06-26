@@ -5,6 +5,7 @@
   "main": "src/index.cjs",
   "scripts": {
     "start": "node src/index.cjs",
+    "debug": "node inspect src/index.cjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
