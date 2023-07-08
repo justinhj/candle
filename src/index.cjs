@@ -117,6 +117,10 @@ Num collisions: ${header.hash_collisions}, Max displacement: ${header.max_displa
 Data size: ${header.data_end}, Garbage size: ${header.garbage_size}`
 }
 
+function murmurHash64BigInt(keyBuffer, seed) {
+  return BigInt('0x' + mhn.murmurHash64(keyBuffer,seed));
+}
+
 // Read the hash file and parse the header into an Object
 async function loadHashHeader(index_file_path) {
   const fileHandle = await fs.open(index_file_path, 'r');
@@ -161,7 +165,7 @@ async function loadHashHeader(index_file_path) {
   if(h.hash_size === 4) {
     h.hash_algorithm = mhn.murmurHash32;
   } else if(h.hash_size === 8) {
-    h.hash_algorithm = mhn.murmurHash64;
+    h.hash_algorithm = murmurHash64BigInt;
   } else {
     throw new Error(`No hash algorithm for hash size ${h.hash_size}`);
   }
@@ -829,7 +833,7 @@ function logiter_close(iter) {
 
 async function run() {
   const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
-  const sparkeyTable = 'sparkey1million';
+  const sparkeyTable = 'sparkey2000';
 
   const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
   const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
