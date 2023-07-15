@@ -1,14 +1,15 @@
 {
-  "name": "candle",
+  "name": "sparkey-candle",
   "version": "1.0.0",
-  "description": "A Sparkey hash reader for javascript",
-  "main": "src/index.cjs",
+  "description": "Sparkey implementation for Javascript and Node.js",
+  "main": "src/index.js",
+  "type": "module",
   "scripts": {
-    "start": "node src/index.cjs",
-    "debug": "node inspect src/index.cjs",
+    "start": "node src/index.js",
+    "debug": "node inspect src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "Justin Heyes-Jones",
   "license": "ISC",
   "dependencies": {
     "mmap-utils": "^1.0.0",
@@ -17,6 +18,7 @@
     "node-pre-gyp": "^0.17.0"
   },
   "devDependencies": {
+    "@types/node": "^20.4.1",
     "eslint": "^8.43.0"
   }
 }

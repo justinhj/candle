@@ -1,6 +1,7 @@
-const fs = require('fs').promises;
-const mhn = require('murmurhash-native');
-const mmap = require('mmap-utils');
+import { promises as fs } from 'fs';
+import mhn from 'murmurhash-native';
+// import mmap from 'mmap-utils';
+import { MMapping } from 'great-big-file-reader';
 
 const HASH_MAGIC_NUMBER = 0x9a11318f;
 const HASH_MAJOR_VERSION = 1;
@@ -104,6 +105,7 @@ function assert_safe_int(num) {
 }
 
 // Debug info about the hash header, not needed for production
+// eslint-disable-next-line no-unused-vars
 function hashHeaderToString(header) {
 
   let average_displacement = bigIntToNumberDivision(header.total_displacement, header.num_entries);
@@ -253,9 +255,14 @@ async function openLog(log_file_path) {
     error = "SPARKEY_LOG_TOO_SMALL";
   } 
 
+  log.mapping = new MMapping(log_file_path, fd.fd);
+
   if(!error) {
     log.fd = fd;
-    log.data = mmap.map(Number(log.data_len), mmap.PROT_READ, mmap.MAP_SHARED, log.fd.fd);
+    // log.data = mmap.map(Number(log.data_len), mmap.PROT_READ, mmap.MAP_SHARED, log.fd.fd);
+    // TODO Note this won't work with large files so we may need something more to describe the current window
+    //   note that log.data is assuming the whole thing is a buffer which we cannot do 
+    log.data = log.mapping.getBuffer(0n, log.data_len);
     log.open_status = MAGIC_VALUE_LOGREADER;
   }
 
@@ -270,6 +277,7 @@ async function openLog(log_file_path) {
 
 // Closes the log file
 async function closeLog(log) {
+  log.mapping.unmap();
   await log.fd.close();
   log.fd = null;
 }
@@ -310,7 +318,11 @@ async function openHash(index_file_path, log_file_path) {
     error = "SPARKEY_LOG_TOO_SMALL";
   } 
 
-  reader.data = mmap.map(Number(reader.data_len), mmap.PROT_READ, mmap.MAP_SHARED, reader.fd.fd);
+  reader.mapping = new MMapping(index_file_path, reader.fd.fd);
+
+  // reader.data = mmap.map(Number(reader.data_len), mmap.PROT_READ, mmap.MAP_SHARED, reader.fd.fd);
+
+  reader.data = reader.mapping.getBuffer(0n, reader.data_len);
   reader.open_status = MAGIC_VALUE_HASHREADER;
 
   return reader;
@@ -388,7 +400,7 @@ function seekblock(iter, log, position) {
 
 function logiter_seek(iter, log, position) {
   assert_iter_open(iter, log);
-  if(position == log.header.data_end) {
+  if(position === log.header.data_end) {
     iter.state = sparkey_iterator_state.SPARKEY_ITER_CLOSED;
     return sparkey_returncode.SPARKEY_SUCCESS;
   }
@@ -440,8 +452,9 @@ function logiter_skip(iter, log, count) {
   return sparkey_returncode.SPARKEY_SUCCESS;
 }
 
-function skip(iter, log, len) {
-  while (len > 0) {
+function skip(iter, log, lenNumber) {
+  let len = BigInt(lenNumber);
+  while (len > 0n) {
     let rc = ensure_available(iter, log);
     if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
       throw new Error(`ensure available failed: ${rc}`);
@@ -469,7 +482,7 @@ function read_vlq(buffer, position) {
     tmp = buffer[safe_next_pos];
     next_pos = position + 1n;
     tmp2 = tmp & 0x7f;
-    if(tmp == tmp2) {
+    if(tmp === tmp2) {
       return {value: res | tmp << shift, next_pos: next_pos};
     }
     res |= tmp2 << shift;
@@ -478,12 +491,12 @@ function read_vlq(buffer, position) {
 }
 
 function logiter_next(iter, log) {
-  if(iter.state == sparkey_iterator_state.SPARKEY_ITER_CLOSED) {
+  if(iter.state === sparkey_iterator_state.SPARKEY_ITER_CLOSED) {
     return sparkey_returncode.SPARKEY_SUCCESS;
   }
   let key_remaining = 0;
   let value_remaining = 0;
-  if(iter.state == sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
+  if(iter.state === sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
     key_remaining = iter.key_remaining;
     value_remaining = iter.value_remaining;
   }
@@ -516,43 +529,38 @@ function logiter_next(iter, log) {
     return sparkey_returncode.SPARKEY_SUCCESS;
   }
 
-  if(log.header.compression_type == sparkey_returncode.SPARKEY_COMPRESSION_NONE) {
+  if(log.header.compression_type === sparkey_compression_type.SPARKEY_COMPRESSION_NONE) {
     iter.block_position += iter.block_offset;
     iter.block_len -= iter.block_offset;
     iter.block_offset = 0n;
     assert_safe_int(iter.block_position);
     iter.compression_buf = log.data.slice(Number(iter.block_position));
     iter.entry_count = -1;
+  } else {
+    throw new Error('Compression type not supported');
   }
 
   iter.entry_count++;
-
-  // printf("block_position %llu block_offset %llu\n", iter->block_position, iter->block_offset);
-  // console.log(`${iter.compression_buf.slice(0,10)} off ${iter.block_offset}`);
-  // console.log(`buf ${iter.compression_buf} ${iter.block_offset}`);
-
-  // console.log(`block_position ${iter.block_position} block_offset ${iter.block_offset}`);
 
   let vnp = read_vlq(iter.compression_buf, iter.block_offset);
   
   let a = vnp.value;
   iter.block_offset = vnp.next_pos;
 
-  // console.log(`a ${a}`);
-
   vnp = read_vlq(iter.compression_buf, iter.block_offset);
   
   let b = vnp.value;
   iter.block_offset = vnp.next_pos;
 
-  // console.log(`b ${b}`);
+  // Each entry begins with two Variable Length Quantity (VLQ) non-negative integers, A and B. The type
+  // is determined by the A. If A = 0, it's a DELETE, and B represents the length of the key to delete.
+  // If A > 0, it's a PUT and the key length is A - 1, and the value length is B.
 
   if(a === 0) {
     iter.keylen = iter.key_remaining = b;
     iter.valuelen = iter.value_remaining = 0;
     iter.type = sparkey_entry_type.SPARKEY_ENTRY_DELETE;
   } else {
-    // console.log(iter);
     iter.keylen = iter.key_remaining = a - 1;
     iter.valuelen = iter.value_remaining = b;
     iter.type = sparkey_entry_type.SPARKEY_ENTRY_PUT;
@@ -679,7 +687,9 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   let displacement = 0n;
   let slot = wanted_slot;
 
-  let hashtable = reader.data.slice(reader.header.header_size);
+  // let hashtable = reader.data.slice(reader.header.header_size);
+  // TODO what should length be here?
+  let hashtable = reader.mapping.getBuffer(BigInt(reader.header.header_size), 40000);
 
   while(true) { // eslint-disable-line no-constant-condition
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
@@ -721,7 +731,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
         throw new Error(sparkey_returncode.SPARKEY_INTERNAL_ERROR);
       }
       // console.log(`key lengths ${keylen} ${keylen2}`);
-      if (keylen == keylen2) {
+      if (keylen === keylen2) {
         let pos2 = 0n;
         let equals = true;
         // To ensure there is an actual match and no collision we need to compare the key
@@ -798,7 +808,7 @@ function logiter_create(log) {
   iter.open_status = MAGIC_VALUE_LOGITER;
   iter.file_identifier = log.header.file_identifier;
   iter.block_position = 0n;
-  iter.next_block_position = log.header.header_size;
+  iter.next_block_position = BigInt(log.header.header_size);
   iter.block_offset = 0n;
   iter.block_len = 0n;
   iter.state = sparkey_iterator_state.SPARKEY_ITER_NEW;
@@ -850,28 +860,43 @@ async function run() {
     // Need a log iterator
     let logIterator = logiter_create(hashReader.log);
 
-    // Create buffers for retrieved values
-    let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
+    var iterate_example = true;
+    var get_example = false;
 
-    let found = 0;
-    let not_found = 0;
+    if(iterate_example) {
+      while(true) {// eslint-disable-line no-constant-condition
+        let rc = logiter_next(logIterator, hashReader.log);
+        if(rc !== sparkey_returncode.SPARKEY_SUCCESS || logIterator.state != sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
+          break;
+        }
 
-    console.log(`Performing lookup on ${lookupKeys.length} keys.`);
-    console.time('lookups');
-
-    lookupKeys.forEach(lookupKeyBuf => {
-      // console.log(`lookup ${lookupKeyBuf.toString()}`);
-      let result = get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
-      if(result.found) {
-        found += 1;
-        // console.log(valueBuffer.slice(0, result.length).toString() + result.length);
-      } else {
-        not_found += 1;
       }
-    });
+    }
 
-    console.timeEnd('lookups');
-    console.log(`found count ${found}, not found count ${not_found}`);
+    if(get_example) {
+      // Create buffer for retrieved values
+      let valueBuffer = Buffer.alloc(Number(hashReader.log.header.max_value_len));
+
+      let found = 0;
+      let not_found = 0;
+
+      console.log(`Performing lookup on ${lookupKeys.length} keys.`);
+      console.time('lookups');
+
+      lookupKeys.forEach(lookupKeyBuf => {
+        // console.log(`lookup ${lookupKeyBuf.toString()}`);
+        let result = get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
+        if(result.found) {
+          found += 1;
+          // console.log(valueBuffer.slice(0, result.length).toString() + result.length);
+        } else {
+          not_found += 1;
+        }
+      });
+
+      console.timeEnd('lookups');
+      console.log(`found count ${found}, not found count ${not_found}`);
+    }
 
     logiter_close(logIterator);
     await closeHash(hashReader);
