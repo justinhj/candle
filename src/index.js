@@ -237,6 +237,7 @@ async function loadLogHeader(log_file_path) {
   }
 
   // console.log(JSON.stringify(h));
+  await fileHandle.close();
   return h;
 }
 
@@ -255,14 +256,14 @@ async function openLog(log_file_path) {
     error = "SPARKEY_LOG_TOO_SMALL";
   } 
 
-  log.mapping = new MMapping(log_file_path, fd.fd);
+  log.mmapping = new MMapping(log_file_path, fd.fd);
 
   if(!error) {
     log.fd = fd;
     // log.data = mmap.map(Number(log.data_len), mmap.PROT_READ, mmap.MAP_SHARED, log.fd.fd);
     // TODO Note this won't work with large files so we may need something more to describe the current window
     //   note that log.data is assuming the whole thing is a buffer which we cannot do 
-    log.data = log.mapping.getBuffer(0n, log.data_len);
+    // log.data = log.mmapping.getBuffer(0n, log.data_len);
     log.open_status = MAGIC_VALUE_LOGREADER;
   }
 
@@ -277,7 +278,7 @@ async function openLog(log_file_path) {
 
 // Closes the log file
 async function closeLog(log) {
-  log.mapping.unmap();
+  log.mmapping.unmap();
   await log.fd.close();
   log.fd = null;
 }
@@ -318,11 +319,11 @@ async function openHash(index_file_path, log_file_path) {
     error = "SPARKEY_LOG_TOO_SMALL";
   } 
 
-  reader.mapping = new MMapping(index_file_path, reader.fd.fd);
+  reader.mmapping = new MMapping(index_file_path, reader.fd.fd);
 
   // reader.data = mmap.map(Number(reader.data_len), mmap.PROT_READ, mmap.MAP_SHARED, reader.fd.fd);
 
-  reader.data = reader.mapping.getBuffer(0n, reader.data_len);
+  reader.data = reader.mmapping.getBuffer(0n, reader.data_len);
   reader.open_status = MAGIC_VALUE_HASHREADER;
 
   return reader;
@@ -390,7 +391,11 @@ function seekblock(iter, log, position) {
   } else {
     // iter.compression_buf = &log.data[position];
     assert_safe_int(position); // TODO this could return Number
-    iter.compression_buf = log.data.slice(Number(position));
+    // Max buffer we care about is max key length plus max max value length plus the max size of the two vlqs
+    let max_buffer = log.header.max_key_len + log.header.max_value_len + 128n;
+    let buffer_size = min64(max_buffer, log.data_len - position);
+    iter.compression_buf = log.mmapping.getBuffer(position, buffer_size);
+    // iter.compression_buf = log.data.slice(Number(position));
     iter.block_position = position;
     iter.next_block_position = log.header.data_end;
     iter.block_len = log.data_len - position;
@@ -533,8 +538,11 @@ function logiter_next(iter, log) {
     iter.block_position += iter.block_offset;
     iter.block_len -= iter.block_offset;
     iter.block_offset = 0n;
-    assert_safe_int(iter.block_position);
-    iter.compression_buf = log.data.slice(Number(iter.block_position));
+
+    let max_buffer = log.header.max_key_len + log.header.max_value_len + 128n;
+    let buffer_size = min64(max_buffer, log.data_len - iter.block_position);
+    iter.compression_buf = log.mmapping.getBuffer(iter.block_position, buffer_size);
+    // iter.compression_buf = log.data.slice(Number(iter.block_position));
     iter.entry_count = -1;
   } else {
     throw new Error('Compression type not supported');
@@ -689,7 +697,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
 
   // let hashtable = reader.data.slice(reader.header.header_size);
   // TODO what should length be here?
-  let hashtable = reader.mapping.getBuffer(BigInt(reader.header.header_size), 40000);
+  let hashtable = reader.mmapping.getBuffer(BigInt(reader.header.header_size), 40000);
 
   while(true) { // eslint-disable-line no-constant-condition
     let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
@@ -864,12 +872,26 @@ async function run() {
     var get_example = false;
 
     if(iterate_example) {
+      let count = 0;
       while(true) {// eslint-disable-line no-constant-condition
         let rc = logiter_next(logIterator, hashReader.log);
         if(rc !== sparkey_returncode.SPARKEY_SUCCESS || logIterator.state != sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
           break;
         }
+        count ++;
+        console.log(`${count} ${logIterator.block_offset} ${logIterator.block_position}`);
 
+        let bo = logIterator.block_offset;
+
+        let key_result = logiter_keychunk(logIterator, hashReader.log, hashReader.log.header.max_key_len); 
+        let k = key_result.buffer.slice(0,Number(key_result.chunk_length)).toString();
+
+        let value_result = logiter_valuechunk(logIterator, hashReader.log, hashReader.log.header.max_value_len);
+        let v = value_result.buffer.slice(0,Number(value_result.chunk_length)).toString();
+
+        console.log(`Key: ${k} Value: ${v}`);
+        
+        logIterator.block_offset = bo;
       }
     }
 
