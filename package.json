@@ -12,7 +12,6 @@
   "author": "Justin Heyes-Jones",
   "license": "ISC",
   "dependencies": {
-    "mmap-utils": "^1.0.0",
     "murmurhash-native": "^3.5.0",
     "node-gyp": "^9.4.0",
     "node-pre-gyp": "^0.17.0"

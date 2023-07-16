@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import mhn from 'murmurhash-native';
-// import mmap from 'mmap-utils';
 import { MMapping } from 'great-big-file-reader';
+import buffer from 'buffer';
 
 const HASH_MAGIC_NUMBER = 0x9a11318f;
 const HASH_MAJOR_VERSION = 1;
@@ -329,24 +329,33 @@ async function openHash(index_file_path, log_file_path) {
   return reader;
 }
 
-function read_addr(hashtable, pos, address_size) {
-  let offset = Number(pos);
-  assert_safe_int(pos);
-  switch (address_size) {
-    case 4: return BigInt(hashtable.readUint32LE(offset));
-    case 8: return hashtable.readBigUint64LE(offset);
+function read_from_hash(rdr, pos, size) {
+  let bigSize = BigInt(size);
+  let adjusted_pos = pos - rdr.buffer_start;  
+  if(adjusted_pos < 0n)  { // before window
+    rdr.buffer_start = rdr.buffer_start + adjusted_pos;
+    rdr.buffer_length = rdr.max_buffer;
+    if(rdr.buffer_start + rdr.buffer_length > rdr.data_len) {
+      rdr.buffer_length = rdr.data_len - rdr.buffer_start;
+    }
+    rdr.buffer = rdr.mmapping.getBuffer(rdr.buffer_start + BigInt(rdr.header.header_size), rdr.buffer_length);
+    adjusted_pos = 0n;
+  } else if(adjusted_pos + bigSize > rdr.buffer_length) {
+    rdr.buffer_start = pos;
+    rdr.buffer_length = rdr.max_buffer;
+    if(rdr.buffer_start + rdr.buffer_length > rdr.data_len) {
+      rdr.buffer_length = rdr.data_len - rdr.buffer_start;
+    }
+    rdr.buffer = rdr.mmapping.getBuffer(rdr.buffer_start + BigInt(rdr.header.header_size), rdr.buffer_length);
+    adjusted_pos = 0n;
   }
-  throw new Error(`Unsupported address size ${address_size}`)
-}
-
-function read_hash(hashtable, pos, hash_size) {
-  assert_safe_int(pos);
-  let offset = Number(pos);
-  switch (hash_size) {
-    case 4: return BigInt(hashtable.readUint32LE(offset));
-    case 8: return hashtable.readBigUint64LE(offset);
+  let offset = Number(adjusted_pos);
+  // assert_safe_int(pos);
+  switch (bigSize) {
+    case 4n: return BigInt(rdr.buffer.readUint32LE(offset));
+    case 8n: return rdr.buffer.readBigUint64LE(offset);
   }
-  throw new Error(`Unsupported hash size ${hash_size}`)
+  throw new Error(`Unsupported size ${bigSize}`)
 }
 
 function assert_log_open(log) {
@@ -687,7 +696,6 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   }
   let hash = BigInt(reader.header.hash_algorithm(lookupKeyBuf, reader.header.hash_seed));
 
-  // uint64_t wanted_slot = hash % reader->header.hash_capacity;
   let wanted_slot = BigInt(hash) % reader.header.hash_capacity;
   let slot_size = BigInt(reader.header.address_size + reader.header.hash_size);
   let pos = wanted_slot * slot_size;
@@ -695,14 +703,10 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   let displacement = 0n;
   let slot = wanted_slot;
 
-  // let hashtable = reader.data.slice(reader.header.header_size);
-  // TODO what should length be here?
-  let hashtable = reader.mmapping.getBuffer(BigInt(reader.header.header_size), 40000);
-
   while(true) { // eslint-disable-line no-constant-condition
-    let hash2 = read_hash(hashtable, pos, reader.header.hash_size); 
-    let position2 = read_addr(hashtable, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    // console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
+    let hash2 = read_from_hash(reader, pos, reader.header.hash_size); 
+    let position2 = read_from_hash(reader, pos + BigInt(reader.header.hash_size), reader.header.address_size);
+    // console.log(`hashes ${hash} hash2 ${hash2} hash_alt ${hash_alt} position2 ${position2}`);
     if(position2 === 0n) {
       // console.log('not found, end of hash table');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
@@ -717,6 +721,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
     if(hash === hash2) {
       let rc = undefined;
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
+      // console.log('seek ' + position2);
       rc = logiter_seek(log_iterator, reader.log, position2);
       if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
         throw new Error(rc);
@@ -869,7 +874,7 @@ async function run() {
     let logIterator = logiter_create(hashReader.log);
 
     var iterate_example = true;
-    var get_example = false;
+    var get_example = true;
 
     if(iterate_example) {
       let count = 0;
@@ -904,6 +909,17 @@ async function run() {
 
       console.log(`Performing lookup on ${lookupKeys.length} keys.`);
       console.time('lookups');
+
+      // max buffer should be the size of the hash file or the max buffer allowed
+      let max_buffer = BigInt(buffer.constants.MAX_LENGTH);
+      if(max_buffer > hashReader.data_len) {
+        max_buffer = hashReader.data_len;
+      }
+      // TODO add some helpers to manage this
+      hashReader.max_buffer = max_buffer;
+      hashReader.buffer_start = 0n;
+      hashReader.buffer_length = max_buffer;
+      hashReader.buffer = hashReader.mmapping.getBuffer(hashReader.buffer_start + BigInt(hashReader.header.header_size), hashReader.buffer_length);
 
       lookupKeys.forEach(lookupKeyBuf => {
         // console.log(`lookup ${lookupKeyBuf.toString()}`);
