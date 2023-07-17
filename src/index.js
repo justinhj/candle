@@ -120,7 +120,8 @@ Data size: ${header.data_end}, Garbage size: ${header.garbage_size}`
 }
 
 function murmurHash64BigInt(keyBuffer, seed) {
-  return BigInt('0x' + mhn.murmurHash64(keyBuffer,seed));
+  let hash = mhn.murmurHash128x64(keyBuffer,seed).slice(0,16);
+  return BigInt('0x' + hash);
 }
 
 // Read the hash file and parse the header into an Object
@@ -706,7 +707,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   while(true) { // eslint-disable-line no-constant-condition
     let hash2 = read_from_hash(reader, pos, reader.header.hash_size); 
     let position2 = read_from_hash(reader, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
+    // console.log(`hash ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
       // console.log('not found, end of hash table');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
@@ -716,12 +717,12 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
       };
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
-    console.log(`entry_index2 ${entry_index2}`);
+    // console.log(`entry_index2 ${entry_index2}`);
     position2 = position2 >> BigInt(reader.header.entry_block_bits);
     if(hash === hash2) {
       let rc = undefined;
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
-      console.log('seek ' + position2);
+      // console.log('seek ' + position2);
       rc = logiter_seek(log_iterator, reader.log, position2);
       if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
         throw new Error(rc);
