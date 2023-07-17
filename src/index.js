@@ -323,7 +323,7 @@ async function openHash(index_file_path, log_file_path) {
 
   // reader.data = mmap.map(Number(reader.data_len), mmap.PROT_READ, mmap.MAP_SHARED, reader.fd.fd);
 
-  reader.data = reader.mmapping.getBuffer(0n, reader.data_len);
+  // reader.data = reader.mmapping.getBuffer(0n, reader.data_len);
   reader.open_status = MAGIC_VALUE_HASHREADER;
 
   return reader;
@@ -706,7 +706,7 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
   while(true) { // eslint-disable-line no-constant-condition
     let hash2 = read_from_hash(reader, pos, reader.header.hash_size); 
     let position2 = read_from_hash(reader, pos + BigInt(reader.header.hash_size), reader.header.address_size);
-    // console.log(`hashes ${hash} hash2 ${hash2} hash_alt ${hash_alt} position2 ${position2}`);
+    console.log(`hashes ${hash} hash2 ${hash2} position2 ${position2}`);
     if(position2 === 0n) {
       // console.log('not found, end of hash table');
       log_iterator.state = 'SPARKEY_ITER_INVALID';
@@ -716,12 +716,12 @@ function get(reader, log_iterator, lookupKeyBuf, valueBuffer) {
       };
     }
     let entry_index2 = position2 & BigInt(reader.header.entry_block_bitmask);
-    // console.log(`entry_index2 ${entry_index2}`);
+    console.log(`entry_index2 ${entry_index2}`);
     position2 = position2 >> BigInt(reader.header.entry_block_bits);
     if(hash === hash2) {
       let rc = undefined;
   //     RETHROW(sparkey_logiter_seek(iter, &reader.log, position2));
-      // console.log('seek ' + position2);
+      console.log('seek ' + position2);
       rc = logiter_seek(log_iterator, reader.log, position2);
       if(rc !== sparkey_returncode.SPARKEY_SUCCESS) {
         throw new Error(rc);
@@ -856,7 +856,7 @@ function logiter_close(iter) {
 
 async function run() {
   const sparkeyPath = '/Users/justin.heyes-jones/projects/lantern/build/';
-  const sparkeyTable = 'sparkey2000';
+  const sparkeyTable = 'sparkey100million';
 
   const sampleIndexFile = sparkeyPath + sparkeyTable + '.spi';
   const sampleLogFile = sparkeyPath + sparkeyTable + '.spl';
@@ -873,18 +873,19 @@ async function run() {
     // Need a log iterator
     let logIterator = logiter_create(hashReader.log);
 
-    var iterate_example = true;
+    var iterate_example = false;
     var get_example = true;
 
     if(iterate_example) {
       let count = 0;
+      let stride = 100000;
       while(true) {// eslint-disable-line no-constant-condition
         let rc = logiter_next(logIterator, hashReader.log);
         if(rc !== sparkey_returncode.SPARKEY_SUCCESS || logIterator.state != sparkey_iterator_state.SPARKEY_ITER_ACTIVE) {
           break;
         }
         count ++;
-        console.log(`${count} ${logIterator.block_offset} ${logIterator.block_position}`);
+        // console.log(`${count} ${logIterator.block_offset} ${logIterator.block_position}`);
 
         let bo = logIterator.block_offset;
 
@@ -894,7 +895,9 @@ async function run() {
         let value_result = logiter_valuechunk(logIterator, hashReader.log, hashReader.log.header.max_value_len);
         let v = value_result.buffer.slice(0,Number(value_result.chunk_length)).toString();
 
-        console.log(`Key: ${k} Value: ${v}`);
+        if(count % stride == 0) {
+          console.log(`Key: ${k} Value: ${v}`);
+        }
         
         logIterator.block_offset = bo;
       }
@@ -922,7 +925,7 @@ async function run() {
       hashReader.buffer = hashReader.mmapping.getBuffer(hashReader.buffer_start + BigInt(hashReader.header.header_size), hashReader.buffer_length);
 
       lookupKeys.forEach(lookupKeyBuf => {
-        // console.log(`lookup ${lookupKeyBuf.toString()}`);
+        console.log(`lookup ${lookupKeyBuf.toString()}`);
         let result = get(hashReader, logIterator, lookupKeyBuf, valueBuffer);
         if(result.found) {
           found += 1;
