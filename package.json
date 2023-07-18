@@ -2,12 +2,12 @@
   "name": "sparkey-candle",
   "version": "1.0.0",
   "description": "Sparkey implementation for Javascript and Node.js",
-  "main": "src/index.js",
+  "main": "lib/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "debug": "node inspect src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node lib/index.js",
+    "debug": "node inspect lib/index.js",
+    "test": "npx tape test/test.js"
   },
   "author": "Justin Heyes-Jones",
   "license": "ISC",
@@ -15,7 +15,8 @@
     "great-big-file-reader": "^1.0.1",
     "murmurhash-native": "^3.5.0",
     "node-gyp": "^9.4.0",
-    "node-pre-gyp": "^0.17.0"
+    "node-pre-gyp": "^0.17.0",
+    "tape": "^5.6.5"
   },
   "devDependencies": {
     "@types/node": "^20.4.1",
