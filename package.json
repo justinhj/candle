@@ -12,7 +12,7 @@
   "author": "Justin Heyes-Jones",
   "license": "ISC",
   "dependencies": {
-    "great-big-file-reader": "^1.0.1",
+    "great-big-file-reader": "^1.0.2",
     "murmurhash-native": "^3.5.0",
     "node-gyp": "^9.4.0",
     "node-pre-gyp": "^0.17.0",
