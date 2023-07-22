@@ -13,6 +13,13 @@ import { sparkey_openHash,
          sparkey_closeHash
         } from '../lib/index.js';
 
+function min64(a, b) {
+  if(a < b) {
+    return a;
+  }
+  return b;
+}
+
 test('find keys', async function (t) {
   const sparkeyPath = './test/';
   const sparkeyTable = 'sparkey1million';
@@ -68,16 +75,15 @@ test('find keys', async function (t) {
     console.log(`Performing lookup on ${lookupKeys.length} keys.`);
     console.time('lookups');
 
-    // max buffer should be the size of the hash file or the max buffer allowed
+    // max buffer should be the size of the hash file, without the header, or the max buffer allowed
     let max_buffer = BigInt(buffer.constants.MAX_LENGTH);
-    if(max_buffer > hashReader.data_len) {
-      max_buffer = hashReader.data_len;
-    }
+    let file_size = hashReader.data_len - BigInt(hashReader.header.header_size);
+    let buffer_size = min64(file_size, max_buffer);
     // TODO add some helpers to manage this
     hashReader.max_buffer = max_buffer;
     hashReader.buffer_start = 0n;
-    hashReader.buffer_length = max_buffer;
-    hashReader.buffer = hashReader.mmapping.getBuffer(hashReader.buffer_start + BigInt(hashReader.header.header_size), hashReader.buffer_length);
+    hashReader.buffer_length = buffer_size;
+    hashReader.buffer = hashReader.mmapping.getBuffer(hashReader.buffer_start + BigInt(hashReader.header.header_size), buffer_size);
 
     lookupKeys.forEach(lookupKeyBuf => {
       console.log(`lookup ${lookupKeyBuf.toString()}`);
