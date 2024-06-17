@@ -4,7 +4,7 @@ Candle implements key lookups for Spotify's [Sparkey](https://github.com/spotify
 
 The goal is to implement the key lookup entirely in Javascript to avoid the complexity and overhead of FFI.
 
-Since the hash and log files are mapped to memory using mmap, which is not natively supported in node.js, a dependency on the [mmap-utils](https://www.npmjs.com/package/mmap-utils) npm package.
+Since the hash and log files are mapped to memory using mmap, which is not natively supported in node.js, a dependency on the [great-big-file-reader]([https://www.npmjs.com/package/mmap-utils](https://github.com/justinhj/great-big-file-reader)) npm package.
 
 In local testing on an Intel MacBook seems to be able to do 700k gets per second on a log file with 1 million entries. More benchmarks to come.
 
